@@ -1,0 +1,81 @@
+/* ChartStyles.css - Styles modernes et fluides UNIQUEMENT pour Recharts */
+
+/* --- Recharts Chart Styling (MODERNE & FLUIDE) --- */
+
+/* Grille Cartésienne */
+.recharts-cartesian-grid-line line {
+    stroke: var(--border-color-light, #f1f5f9) !important; /* Utilise variable ou fallback */
+    stroke-dasharray: 4 4 !important;
+  }
+  /* Cacher les lignes verticales de la grille */
+  .recharts-cartesian-grid-vertical line {
+    stroke-opacity: 0 !important;
+  }
+
+  /* Axes X et Y */
+  .recharts-xAxis line, .recharts-yAxis line,
+  .recharts-xAxis .recharts-cartesian-axis-tick-line,
+  .recharts-yAxis .recharts-cartesian-axis-tick-line {
+    stroke: var(--border-color-base, #e2e8f0) !important; /* Utilise variable ou fallback */
+    stroke-width: 1px !important;
+  }
+  /* Texte des graduations (ticks) */
+  .recharts-cartesian-axis-tick-value tspan {
+    fill: var(--text-secondary, #64748b) !important; /* Utilise variable ou fallback */
+    font-size: 0.75rem !important;
+    font-family: var(--font-family, 'Inter', sans-serif) !important; /* Utilise variable ou fallback */
+  }
+  /* Optionnel: Label des axes (si ajoutés) */
+  .recharts-label {
+      fill: var(--text-primary, #334155) !important; /* Utilise variable ou fallback */
+      font-size: 0.85rem !important;
+      font-weight: 500 !important;
+  }
+
+  /* Barres */
+  .recharts-bar-rectangle .recharts-rectangle {
+    rx: 4px !important; /* Coins arrondis */
+    ry: 4px !important;
+    transition: opacity var(--transition-duration, 0.2s) var(--transition-timing, ease-in-out) !important; /* Utilise variable ou fallback */
+  }
+  .recharts-bar-rectangle:hover .recharts-rectangle {
+    opacity: 0.85 !important; /* Légèrement transparent au survol */
+  }
+
+  /* Tooltip (Infobulle au survol) */
+  .recharts-tooltip-wrapper {
+    background-color: rgba(255, 255, 255, 0.95) !important;
+    backdrop-filter: blur(4px) !important;
+    border: 1px solid var(--border-color-light, #f1f5f9) !important; /* Utilise variable ou fallback */
+    border-radius: var(--border-radius-base, 8px) !important; /* Utilise variable ou fallback */
+    box-shadow: var(--shadow-lg, 0 10px 15px -3px rgba(0, 0, 0, 0.08)) !important; /* Utilise variable ou fallback */
+    padding: 12px 16px !important;
+    font-family: var(--font-family, 'Inter', sans-serif) !important;
+    font-size: 0.85em !important;
+    color: var(--text-primary, #334155) !important;
+  }
+  .recharts-tooltip-label {
+    font-weight: 600 !important;
+    color: var(--text-primary, #334155) !important;
+    margin-bottom: 8px !important;
+    padding-bottom: 8px !important;
+    border-bottom: 1px solid var(--border-color-light, #f1f5f9) !important;
+  }
+  .recharts-tooltip-item-list { padding: 0 !important; margin: 0 !important; list-style: none !important; }
+  .recharts-tooltip-item { color: var(--text-secondary, #64748b) !important; font-size: 0.9em !important; padding: 3px 0 !important; }
+  .recharts-tooltip-item-name, .recharts-tooltip-item-value { color: inherit !important; }
+  .recharts-tooltip-item-value { font-weight: 500 !important; margin-left: 6px; }
+  .recharts-tooltip-item-separator { display: none !important; }
+  .recharts-tooltip-item-icon { width: 8px !important; height: 8px !important; border-radius: 2px !important; margin-right: 6px !important; display: inline-block !important; }
+
+  /* Légende */
+  .recharts-legend-wrapper { padding-top: 20px !important; text-align: center !important; }
+  .recharts-legend-item {
+    display: inline-flex !important; align-items: center !important;
+    margin-right: 20px !important; margin-bottom: 5px !important;
+    font-size: 0.85rem !important; color: var(--text-secondary, #64748b) !important;
+    cursor: default !important;
+    transition: color var(--transition-duration, 0.2s) var(--transition-timing, ease-in-out) !important;
+  }
+  .recharts-legend-item:hover { color: var(--text-primary, #334155) !important; }
+  .recharts-legend-icon { width: 10px !important; height: 10px !important; border-radius: 3px !important; margin-right: 8px !important; }
