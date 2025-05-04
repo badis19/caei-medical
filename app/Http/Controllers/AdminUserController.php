@@ -40,7 +40,7 @@ class AdminUserController extends Controller
     public function store(Request $request)
     {
         $availableRoles = ['administrateur', 'superviseur', 'agent', 'confirmateur', 'patient', 'clinique'];
-
+    
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
@@ -50,11 +50,11 @@ class AdminUserController extends Controller
             'adresse' => 'nullable|string',
             'password' => 'nullable|string|min:8',
         ]);
-
+    
         if ($validator->fails()) {
             return response()->json($validator->errors(), 422);
         }
-
+    
         $user = User::create([
             'name' => $request->name,
             'last_name' => $request->last_name,
@@ -63,20 +63,25 @@ class AdminUserController extends Controller
             'adresse' => $request->adresse,
             'role' => $request->role,
         ]);
-
+    
         $user->assignRole($request->role);
-
+    
         if ($request->filled('password')) {
+            // Hash the password and save it
             $user->password = Hash::make($request->password);
             $user->save();
+    
+            // Send welcome email with plaintext password
+            $user->notify(new \App\Notifications\WelcomePasswordSetup(null, $user->email, $request->password));
         } else {
+            // Create a password reset token and send setup link
             $token = app('auth.password.broker')->createToken($user);
-            $user->notify(new WelcomePasswordSetup($token, $user->email));
+            $user->notify(new \App\Notifications\WelcomePasswordSetup($token, $user->email));
         }
-
+    
         return response()->json($user->load('roles:id,name'), 201);
     }
-
+    
     public function update(Request $request, $id)
     {
         $user = User::findOrFail($id);

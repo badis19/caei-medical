@@ -12,6 +12,8 @@ import SupervisorDashboard from './components/SupervisorDashboard';
 import AgentDashboard from './components/AgentDashboard';
 import ConfirmateurDashboard from './components/ConfirmateurDashboard';
 import PatientDashboard from './components/PatientDashboard';
+import CliniqueDashboard from './components/CliniqueDashboard';
+
 import ForgotPassword from './components/ForgotPassword';
 import EmailVerification from './components/EmailVerification';
 import ResetPassword from './components/ResetPassword';
@@ -28,9 +30,11 @@ function App() {
             case 'agent': return '/agent';
             case 'confirmateur': return '/confirmateur';
             case 'patient': return '/patient';
+            case 'clinique': return '/clinique'; // ✅ Add this line
             default: return '/';
         }
     };
+
 
     const ProtectedRoute = ({ children, allowedRole }) => {
         if (!isAuthenticated) return <Navigate to="/login" replace />;
@@ -96,6 +100,11 @@ function App() {
                         path="/patient"
                         element={<ProtectedRoute allowedRole="patient"><PatientDashboard /></ProtectedRoute>}
                     />
+                    <Route
+                        path="/clinique"
+                        element={<ProtectedRoute allowedRole="clinique"><CliniqueDashboard /></ProtectedRoute>}
+                    />
+
 
                     {/* Catch-all */}
                     <Route

@@ -41,7 +41,7 @@ class SupervisorUserController extends Controller
     {
         // Supervisor is NOT allowed to create admin or supervisor users
         $allowedRoles = ['agent', 'confirmateur', 'patient', 'clinique'];
-
+    
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
@@ -51,11 +51,11 @@ class SupervisorUserController extends Controller
             'adresse' => 'nullable|string',
             'password' => 'nullable|string|min:8',
         ]);
-
+    
         if ($validator->fails()) {
             return response()->json($validator->errors(), 422);
         }
-
+    
         $user = User::create([
             'name' => $request->name,
             'last_name' => $request->last_name,
@@ -64,20 +64,25 @@ class SupervisorUserController extends Controller
             'adresse' => $request->adresse,
             'role' => $request->role,
         ]);
-
+    
         $user->assignRole($request->role);
-
+    
         if ($request->filled('password')) {
+            // Hash and save password
             $user->password = Hash::make($request->password);
             $user->save();
+    
+            // Notify user with the plaintext password
+            $user->notify(new \App\Notifications\WelcomePasswordSetup(null, $user->email, $request->password));
         } else {
+            // Generate token and notify user with password setup link
             $token = app('auth.password.broker')->createToken($user);
-            $user->notify(new WelcomePasswordSetup($token, $user->email));
+            $user->notify(new \App\Notifications\WelcomePasswordSetup($token, $user->email));
         }
-
+    
         return response()->json($user->load('roles:id,name'), 201);
     }
-
+    
     public function update(Request $request, $id)
     {
         $user = User::findOrFail($id);

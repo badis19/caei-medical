@@ -84,7 +84,7 @@ if (!$patient) {
                 'status' => 'pending',
                 'nom_du_prospect' => $patient->last_name,
                 'prenom_du_prospect' => $patient->name,
-                'telephone' => $patient->telephone,
+                'telephone' => $patient->telephone ?? 'N/A',
                 'email' => $patient->email,
             ]
         ));

@@ -2,18 +2,23 @@
 
 namespace App\Notifications;
 
+use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Notification;
 use Illuminate\Notifications\Messages\MailMessage;
 
 class WelcomePasswordSetup extends Notification
 {
-    public $token;
-    public $user;
+    use Queueable;
 
-    public function __construct($token, $user)
+    protected $token;
+    protected $email;
+    protected $plaintextPassword;
+
+    public function __construct($token = null, $email, $plaintextPassword = null)
     {
         $this->token = $token;
-        $this->user = $user;
+        $this->email = $email;
+        $this->plaintextPassword = $plaintextPassword;
     }
 
     public function via($notifiable)
@@ -22,15 +27,20 @@ class WelcomePasswordSetup extends Notification
     }
 
     public function toMail($notifiable)
-{
-    $frontendUrl = config('app.frontend_url', 'http://localhost:5173');
+    {
+        $mail = (new MailMessage)
+            ->subject('Welcome to the Platform')
+            ->greeting("Hello {$notifiable->name},")
+            ->line("Your account has been created with email: {$this->email}");
 
-    $resetUrl = "{$frontendUrl}/reset-password?token={$this->token}&email=" . urlencode($notifiable->email);
+        if ($this->plaintextPassword) {
+            $mail->line("Your temporary password is: **{$this->plaintextPassword}**")
+                 ->line("You can log in directly using these credentials.");
+        } else {
+            $mail->line('To set your password, click the button below:')
+                 ->action('Set Password', url(config('app.url') . route('password.reset', $this->token, false)));
+        }
 
-    return (new MailMessage)
-        ->subject('Welcome to Caei - Set Your Password')
-        ->line('Click the button below to set your password and access your account.')
-        ->action('Set Password', $resetUrl)
-        ->line('If you didn’t request this, no further action is required.');
-}
+        return $mail->line('Thank you for joining us!');
+    }
 }

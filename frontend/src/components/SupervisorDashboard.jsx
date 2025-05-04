@@ -15,7 +15,7 @@ import {
     AppBar, Toolbar, Typography, Container, Grid, Card, CardHeader, CardContent, Button, TextField,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TablePagination, Paper, Box,
     Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Select, MenuItem, InputLabel, FormControl,
-    CircularProgress, Alert, IconButton, Skeleton, Tooltip, Drawer, List, ListItem, ListItemText, ListItemIcon
+    CircularProgress, Alert, IconButton, Skeleton, Tooltip, Drawer, List, ListItem, ListItemText, ListItemIcon,Link
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -609,9 +609,9 @@ function SupervisorDashboard() {
 
     const { logout } = useContext(AuthContext); // 👈 from AuthContext
 
-const handleLogout = () => {
-  logout(); // this handles everything (removing token, context, redirect, etc.)
-};
+    const handleLogout = () => {
+        logout(); // this handles everything (removing token, context, redirect, etc.)
+    };
 
     // --- Dialog Management ---
 
@@ -1083,7 +1083,30 @@ const handleLogout = () => {
                                             <TableRow hover key={appt.id}>
                                                 <TableCell>{appt.prenom_du_prospect} {appt.nom_du_prospect}</TableCell>
                                                 <TableCell>{appt.date_du_rdv ? new Date(appt.date_du_rdv).toLocaleDateString() : 'N/A'}</TableCell>
-                                                <TableCell>{appt.status || 'N/A'}</TableCell>
+                                                <TableCell>
+                                                    {/* Display the status */}
+                                                    {appt.status || 'N/A'}
+
+                                                    {/* Conditionally display the Link if clinic_quote_url exists */}
+                                                    {appt.clinic_quote_url && (
+                                                        <Box sx={{ mt: 0.5 }}> {/* Add a little space above the link */}
+                                                            <Link
+                                                                href={appt.clinic_quote_url} // Use the URL from the appointment data
+                                                                target="_blank"             // Open in a new tab
+                                                                rel="noopener noreferrer"   // Security measure for target="_blank"
+                                                                variant="body2"             // Use a smaller text style
+                                                                sx={{
+                                                                    fontSize: '0.85em',     // Further reduce font size slightly
+                                                                    fontWeight: 'medium',
+                                                                    display: 'inline-block', // Prevents taking full width
+                                                                    // Optional: Add specific color if needed, e.g., color: 'primary.main'
+                                                                }}
+                                                            >
+                                                                View Clinic Quote
+                                                            </Link>
+                                                        </Box>
+                                                    )}
+                                                </TableCell>
                                             </TableRow>
                                         )) : (
                                             <TableRow><TableCell colSpan={3} align="center">No recent appointments.</TableCell></TableRow>

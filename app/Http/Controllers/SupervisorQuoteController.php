@@ -117,4 +117,25 @@ class SupervisorQuoteController extends Controller
         $filename = $quote->filename ?? basename($quote->file_path) ?? 'quote.pdf';
         return response()->download($filePath, $filename);
     }
+
+    public function clinicQuotes(Request $request)
+    {
+        $appointments = Appointment::with(['patient:id,name,last_name,email', 'agent:id,name,last_name'])
+            ->whereNotNull('clinic_quote_file')
+            ->latest()
+            ->paginate(10);
+    
+        $appointments->getCollection()->transform(function ($appt) {
+            return [
+                'id' => $appt->id,
+                'patient' => $appt->patient,
+                'agent' => $appt->agent,
+                'date' => $appt->created_at->toDateTimeString(),
+                'file_url' => Storage::disk('public')->url($appt->clinic_quote_file),
+            ];
+        });
+    
+        return response()->json($appointments);
+    }
+    
 }
