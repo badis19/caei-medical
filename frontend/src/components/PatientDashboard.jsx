@@ -1,17 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import axios from '../axios'; // Your configured axios instance
-import { useNavigate, Link as RouterLink } from 'react-router-dom';
-import { useContext } from 'react';
+import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
+import axios from '../axios'; // Votre instance axios configurée
+import { useNavigate, Link as RouterLink } from 'react-router-dom'; // Garder RouterLink si utilisé, sinon supprimer
 import { AuthContext } from '../AuthContext.jsx';
 
-// Material UI Components
-import {
-    AppBar, Toolbar, Typography, Card, CardHeader, CardContent, Button, TextField,
-    Box, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, CircularProgress,
-    Alert, Skeleton, Paper, Chip, Divider, List, ListItem, ListItemText, IconButton, Input,
-    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Drawer, ListItemIcon
-} from '@mui/material';
-import EditIcon from '@mui/icons-material/Edit';
+// --- Garder les icônes nécessaires (si non remplacées par des SVG) ---
+import EditIcon from '@mui/icons-material/Edit'; // Exemple : Garder si utilisé
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -20,16 +13,19 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import EventIcon from '@mui/icons-material/Event';
 import DescriptionIcon from '@mui/icons-material/Description';
-import MenuIcon from '@mui/icons-material/Menu';
+import MenuIcon from '@mui/icons-material/Menu'; // Garder pour le toggle
 
-// Toast Notifications
+// --- Notifications Toast (Garder) ---
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
-// API Client Configuration
+import './dashboard.css'; // Assurez-vous que ce fichier CSS existe et est correctement stylisé
+
+
+// --- Configuration du client Axios (Garder tel quel) ---
 const apiClient = axios.create({
     baseURL: import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api',
-    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }
+    headers: { 'Accept': 'application/json' } // Content-Type peut être défini par requête (ex: pour les uploads de fichiers)
 });
 apiClient.interceptors.request.use(config => {
     const token = localStorage.getItem('token');
@@ -37,76 +33,185 @@ apiClient.interceptors.request.use(config => {
     return config;
 }, error => Promise.reject(error));
 
+// --- Composant Modal de Confirmation Réutilisable ---
+const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message, confirmText = 'Confirmer', cancelText = 'Annuler', isLoading = false, children }) => {
+    if (!isOpen) return null;
+    return (
+        <div className={`modal-overlay ${!isOpen ? 'closing' : ''}`} onClick={onClose}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                {title && <h3 className="modal-title">{title}</h3>}
+                <p className="modal-message">{message}</p>
+                {children && <div className="modal-body">{children}</div>}
+                <div className="modal-actions">
+                    <button onClick={onClose} className="modal-button cancel-button" disabled={isLoading}>{cancelText}</button>
+                    <button onClick={onConfirm} className="modal-button confirm-button" disabled={isLoading}>
+                        {isLoading ? (<div className="button-spinner"></div>) : confirmText}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
 function PatientDashboard() {
     const navigate = useNavigate();
+    const { logout } = useContext(AuthContext); // Utiliser le contexte pour la déconnexion
     const [userRole, setUserRole] = useState(null);
     const [userName, setUserName] = useState('');
     const [sidebarOpen, setSidebarOpen] = useState(false);
-    const [activeSection, setActiveSection] = useState('profile');
+    const [activeSection, setActiveSection] = useState('profile'); // Section par défaut
 
-    // Data States
+    // États des données
     const [profileData, setProfileData] = useState(null);
-    const [quoteData, setQuoteData] = useState(null);
-    const [quoteContext, setQuoteContext] = useState(null);
+    const [quoteData, setQuoteData] = useState([]);
+    const [quoteContext, setQuoteContext] = useState([]); // Rendez-vous lié au devis
     const [appointments, setAppointments] = useState([]);
 
-    // UI / Form States
+    // États UI / Formulaires
     const [loading, setLoading] = useState({ profile: false, quote: false, appointments: false, auth: true, action: false, fileUpload: false });
-    const [error, setError] = useState({ profile: null, quote: null, appointments: null, general: null, fileUpload: null });
-    const [isEditingProfile, setIsEditingProfile] = useState(false);
-    const [editableProfileData, setEditableProfileData] = useState({});
-    const [isQuoteActionDialogOpen, setIsQuoteActionDialogOpen] = useState(false);
+    const [error, setError] = useState({ profile: null, quote: null, appointments: null, general: null, fileUpload: null, dialog: null }); // Erreur de dialogue ajoutée
+    const [isEditingProfile, setIsEditingProfile] = useState(false); // Garder cet état
+    const [editableProfileData, setEditableProfileData] = useState({}); // Garder cet état
+    const [isQuoteActionDialogOpen, setIsQuoteActionDialogOpen] = useState(false); // État pour la modale personnalisée
     const [quoteAction, setQuoteAction] = useState({ quoteId: null, targetStatus: '' });
     const [refusalComment, setRefusalComment] = useState('');
     const [selectedFile, setSelectedFile] = useState(null);
+    const fileInputRef = useRef(null); // Ref pour l'input de fichier
 
 
-    const handleFileChange = (event) => {
-        const file = event.target.files[0];
-        if (file && file.type === 'application/pdf') {
-            setSelectedFile(file);
-            setError(prev => ({ ...prev, fileUpload: null }));
-        } else {
-            setSelectedFile(null);
-            setError(prev => ({ ...prev, fileUpload: 'Please select a valid PDF file.' }));
-            toast.error('Please select a valid PDF file.');
+    // --- Écouteur Pusher/Echo ---
+    // Déclaration de fetchQuote déplacée plus tôt pour éviter l'avertissement ESLint dans useEffect
+    const fetchQuote = useCallback(async () => {
+        setLoading(prev => ({ ...prev, quote: true }));
+        setError(prev => ({ ...prev, quote: null }));
+        try {
+            const response = await apiClient.get('/patient/quotes');
+            console.log('✅ Devis récupérés:', response.data);
+
+            setQuoteData(response.data || []);
+
+
+            // setQuoteContext(response.data.appointment); // Stocker les données du rendez-vous lié (Vérifier la structure de la réponse)
+            // Note : La structure `response.data.appointment` semble incorrecte si `response.data` est un tableau.
+            // Si chaque élément du tableau a une propriété `appointment`, il faudra l'extraire dans la boucle .map plus tard.
+        } catch (err) {
+            if (err.response?.status === 404) {
+                // C'est normal si aucun devis n'est trouvé initialement
+                setQuoteData([]); // Initialiser comme tableau vide
+                setQuoteContext(null); // Ou [] selon ce qui est attendu
+            } else {
+                setError(prev => ({ ...prev, quote: 'Échec du chargement des informations du devis.' }));
+                toast.error("Impossible de charger les détails du devis.");
+            }
+        } finally { setLoading(prev => ({ ...prev, quote: false })); }
+    }, []); // Tableau de dépendances vide si cela ne dépend pas d'état/props externes
+
+    useEffect(() => {
+        // S'assurer que Echo est initialisé, que l'utilisateur est patient et que l'ID de profil est disponible
+        if (!window.Echo || userRole !== 'patient' || !profileData?.id) {
+            console.log('⏳ En attente de Echo, du rôle, ou de l\'ID profileData pour Pusher');
+            return;
         }
-    };
-    // Authorization and Initial Data Fetch
+
+        const channelName = `role.patient.${profileData.id}`;
+        console.log(`📡 Abonnement au canal Pusher : ${channelName}`);
+
+        const patientChannel = window.Echo.private(channelName);
+
+        patientChannel
+            .subscribed(() => {
+                console.log(`✅ Abonné avec succès à ${channelName}`);
+            })
+            .error(error => {
+                console.error(`❌ Erreur d'abonnement au canal Pusher ${channelName}:`, error);
+            })
+            patientChannel
+        .subscribed(() => {
+            console.log(`✅ Abonné avec succès à ${channelName}`);
+        })
+        .error(error => {
+            console.error(`❌ Erreur d'abonnement au canal Pusher ${channelName}:`, error);
+        })
+        .listen('.quote.sent.to.patient', (event) => {
+            console.log('📩 [Patient] Événement Pusher reçu : quote.sent.to.patient', event);
+            toast.info('📄 Un nouveau devis vous a été envoyé !');
+            fetchQuote();
+        })
+        .listen('.appointment.created', (event) => {
+            console.log('📅 [Patient] Événement Pusher reçu : appointment.created', event);
+            toast.info('📅 Un nouveau rendez-vous a été créé pour vous !');
+            fetchAppointments();
+        })
+        .listen('.appointment.status.updated', (event) => {
+            console.log('🔄 [Patient] Statut du rendez-vous mis à jour :', event);
+            toast.info(`📌 Statut du rendez-vous mis à jour : ${event.status}`);
+            fetchAppointments();
+        });
+
+
+            
+
+
+        // Fonction de nettoyage pour quitter le canal lorsque le composant est démonté ou que les dépendances changent
+        return () => {
+            console.log(`👋 Quitte le canal Pusher ${channelName}`);
+            window.Echo.leave(channelName);
+        };
+    }, [userRole, profileData?.id, fetchQuote]); // Dépendances : rôle, ID de profil, et la fonction fetch elle-même
+
+
+    // Autorisation et récupération initiale des données
     useEffect(() => {
         const checkAuthAndFetch = async () => {
             setLoading(prev => ({ ...prev, auth: true }));
             setError(prev => ({ ...prev, general: null }));
             const token = localStorage.getItem('token');
-            if (!token) { navigate('/login'); return; }
+            if (!token) {
+                navigate('/login'); // Rediriger si pas de token
+                return;
+            }
             try {
+                // Vérifier le token et obtenir les infos utilisateur
                 const response = await apiClient.get('/user');
-                const isPatient = response.data?.roles?.some(role => role.name === 'patient') || response.data?.role === 'patient';
+                const isPatient = response.data?.roles?.some(role => role.name === 'patient') || response.data?.role === 'patient'; // Vérifier le rôle
+
                 if (isPatient) {
                     setUserRole('patient');
                     setUserName(response.data?.name || 'Patient');
-                    fetchProfile();
-                    fetchQuote();
-                    fetchAppointments();
+                    // Récupérer les données initiales
+                    await fetchProfile(); // Récupérer le profil d'abord pour obtenir l'ID pour Pusher
+                    await fetchQuote();
+                    await fetchAppointments();
                 } else {
-                    setError(prev => ({ ...prev, general: 'Access Denied: Patient role required.' }));
-                    navigate('/login');
+                    setError(prev => ({ ...prev, general: 'Accès Refusé : Rôle patient requis.' }));
+                    toast.error('Accès Refusé : Rôle patient requis.');
+                    handleLogout(); // Déconnecter si ce n'est pas un patient
                 }
             } catch (err) {
-                setError(prev => ({ ...prev, general: 'Authentication failed. Please login again.' }));
-                handleLogout();
-            } finally { setLoading(prev => ({ ...prev, auth: false })); }
+                console.error("Échec de la vérification d'authentification (Patient):", err);
+                const message = err.response?.status === 401
+                    ? 'Session expirée. Veuillez vous reconnecter.'
+                    : 'Échec de l\'authentification. Veuillez vous reconnecter.';
+                setError(prev => ({ ...prev, general: message }));
+                toast.error(message);
+                handleLogout(); // Déconnecter en cas d'erreur d'authentification
+            } finally {
+                setLoading(prev => ({ ...prev, auth: false }));
+            }
         };
         checkAuthAndFetch();
-    }, [navigate]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [navigate]); // Exécuter seulement au montage / changement de navigate
 
-    // Data Fetching Functions
+    // Fonctions de récupération de données
     const fetchProfile = useCallback(async () => {
         setLoading(prev => ({ ...prev, profile: true }));
         setError(prev => ({ ...prev, profile: null }));
         try {
             const response = await apiClient.get('/patient/profile');
             setProfileData(response.data);
+            // Initialiser les données modifiables seulement si les données du profil sont récupérées avec succès
             setEditableProfileData({
                 telephone: response.data.telephone || '',
                 date_de_naissance: response.data.date_de_naissance || '',
@@ -115,110 +220,140 @@ function PatientDashboard() {
                 medical_history: response.data.medical_history || ''
             });
         } catch (err) {
-            setError(prev => ({ ...prev, profile: 'Failed to load profile information.' }));
-            toast.error("Could not load profile.");
+            console.error("Échec de la récupération du profil:", err);
+            setError(prev => ({ ...prev, profile: 'Échec du chargement des informations du profil.' }));
+            toast.error("Impossible de charger le profil.");
         } finally { setLoading(prev => ({ ...prev, profile: false })); }
-    }, []);
+    }, []); // Pas de dépendances nécessaires ici
 
-    const fetchQuote = useCallback(async () => {
-        setLoading(prev => ({ ...prev, quote: true }));
-        setError(prev => ({ ...prev, quote: null }));
-        try {
-            const response = await apiClient.get('/patient/quote');
-            setQuoteData(response.data.quote);
-            setQuoteContext(response.data.appointment);
-        } catch (err) {
-            if (err.response?.status !== 404) {
-                setError(prev => ({ ...prev, quote: 'Failed to load quote information.' }));
-                toast.error("Could not load quote details.");
-            }
-        } finally { setLoading(prev => ({ ...prev, quote: false })); }
-    }, []);
 
     const fetchAppointments = useCallback(async () => {
         setLoading(prev => ({ ...prev, appointments: true }));
         setError(prev => ({ ...prev, appointments: null }));
         try {
             const response = await apiClient.get('/patient/appointments');
+            // Trier les rendez-vous par date, les plus récents en premier
             setAppointments(response.data.sort((a, b) => new Date(b.date_du_rdv) - new Date(a.date_du_rdv)));
         } catch (err) {
-            setError(prev => ({ ...prev, appointments: 'Failed to load appointment information.' }));
-            toast.error("Could not load appointments.");
+            console.error("Échec de la récupération des rendez-vous:", err);
+            setError(prev => ({ ...prev, appointments: 'Échec du chargement des informations des rendez-vous.' }));
+            toast.error("Impossible de charger les rendez-vous.");
         } finally { setLoading(prev => ({ ...prev, appointments: false })); }
     }, []);
 
-    // Action Handlers
+    // Gestionnaires d'actions
     const handleProfileUpdate = async () => {
         setLoading(prev => ({ ...prev, action: true }));
+        setError(prev => ({ ...prev, general: null })); // Effacer les erreurs générales
         const payload = {
+            // Inclure seulement les champs modifiables par le patient
             telephone: editableProfileData.telephone,
-            date_de_naissance: editableProfileData.date_de_naissance || null,
+            date_de_naissance: editableProfileData.date_de_naissance || null, // Gérer date vide
             adresse: editableProfileData.adresse || null,
             allergies: editableProfileData.allergies || null,
             medical_history: editableProfileData.medical_history || null,
         };
         try {
             const response = await apiClient.put('/patient/profile', payload);
-            setProfileData(response.data);
-            setIsEditingProfile(false);
-            toast.success("Profile updated successfully!");
+            setProfileData(response.data); // Mettre à jour l'état des données du profil
+            setIsEditingProfile(false); // Quitter le mode édition
+            toast.success("Profil mis à jour avec succès !");
         } catch (err) {
-            const errorMsg = `Failed to update profile. ${err.response?.data?.message || 'Check details.'}`;
-            setError(prev => ({ ...prev, general: errorMsg }));
+            console.error("Échec de la mise à jour du profil:", err.response?.data || err.message);
+            const errorMsg = `Échec de la mise à jour du profil. ${err.response?.data?.message || 'Veuillez vérifier vos entrées.'}`;
+            setError(prev => ({ ...prev, general: errorMsg })); // Afficher l'erreur spécifique à cette action
             toast.error(errorMsg);
         } finally { setLoading(prev => ({ ...prev, action: false })); }
     };
 
     const handleQuoteStatusUpdate = async () => {
         if (quoteAction.targetStatus === 'refused' && !refusalComment.trim()) {
-            toast.error('Refusal comment is required.');
+            toast.error('Le commentaire de refus est obligatoire.');
+            setError(prev => ({ ...prev, dialog: 'Le commentaire de refus est obligatoire.' })); // Afficher l'erreur dans la modale
             return;
         }
         setLoading(prev => ({ ...prev, action: true }));
+        setError(prev => ({ ...prev, dialog: null })); // Effacer l'erreur de la modale
+
         const payload = {
             status: quoteAction.targetStatus,
             ...(quoteAction.targetStatus === 'refused' && { comment: refusalComment.trim() })
         };
+
         try {
             const response = await apiClient.patch(`/patient/quotes/${quoteAction.quoteId}/status`, payload);
-            setQuoteData(response.data);
-            closeQuoteActionDialog();
-            toast.success(`Quote status updated to ${quoteAction.targetStatus}.`);
+            // Mettre à jour les données du devis spécifique dans le tableau quoteData
+            setQuoteData(prevQuoteData =>
+                prevQuoteData.map(item =>
+                    item.quote.id === quoteAction.quoteId ? { ...item, quote: response.data } : item
+                )
+            );
+            closeQuoteActionDialog(); // Fermer la modale
+            toast.success(`Statut du devis mis à jour à ${quoteAction.targetStatus === 'accepted' ? 'Accepté' : 'Refusé'}.`);
         } catch (err) {
-            const errorMsg = `Failed to update quote status: ${err.response?.data?.message || 'Error occurred'}`;
-            setError(prev => ({ ...prev, general: errorMsg }));
+            console.error("Échec de la mise à jour du statut du devis:", err.response?.data || err.message);
+            const errorMsg = `Échec de la mise à jour du statut du devis : ${err.response?.data?.message || 'Une erreur est survenue'}`;
+            setError(prev => ({ ...prev, dialog: errorMsg })); // Afficher l'erreur dans la modale
             toast.error(errorMsg);
         } finally { setLoading(prev => ({ ...prev, action: false })); }
     };
 
-    const { logout } = useContext(AuthContext); // 👈 from AuthContext
+    const handleLogout = () => {
+        logout(); // Utiliser logout depuis AuthContext
+        navigate('/login'); // Rediriger vers la page de connexion après déconnexion
+    };
 
-const handleLogout = () => {
-  logout(); // this handles everything (removing token, context, redirect, etc.)
-};
-
+    const handleFileChange = (event) => {
+        const file = event.target.files[0];
+        if (file && file.type === 'application/pdf') {
+            setSelectedFile(file);
+            setError(prev => ({ ...prev, fileUpload: null })); // Effacer l'erreur de fichier précédente
+        } else {
+            setSelectedFile(null);
+            const errorMsg = 'Veuillez sélectionner un fichier PDF valide.';
+            setError(prev => ({ ...prev, fileUpload: errorMsg }));
+            toast.error(errorMsg);
+            if (fileInputRef.current) {
+                fileInputRef.current.value = null; // Réinitialiser l'input de fichier
+            }
+        }
+    };
 
     const handleFileUpload = async () => {
-        if (!selectedFile) return;
+        if (!selectedFile) {
+            toast.warn('Veuillez sélectionner un fichier PDF à téléverser.');
+            return;
+        }
         setLoading(prev => ({ ...prev, fileUpload: true }));
+        setError(prev => ({ ...prev, fileUpload: null })); // Effacer les erreurs précédentes
+
         const formData = new FormData();
-        formData.append('file', selectedFile);
+        formData.append('file', selectedFile); // 'file' doit correspondre à l'attente du backend
+
         try {
+            // Utiliser apiClient configuré avec l'URL de base et l'intercepteur d'authentification
             await apiClient.post('/patient/medical-files/upload', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
+                headers: { 'Content-Type': 'multipart/form-data' } // Important pour les uploads de fichiers
             });
-            toast.success(`File "${selectedFile.name}" uploaded successfully!`);
-            setSelectedFile(null);
-            document.getElementById('medical-file-input').value = null;
+            toast.success(`Fichier "${selectedFile.name}" téléversé avec succès !`);
+            setSelectedFile(null); // Effacer l'état du fichier sélectionné
+            if (fileInputRef.current) {
+                fileInputRef.current.value = null; // Réinitialiser l'input de fichier visuellement
+            }
+            // Optionnellement, recharger le profil ou les données liées si l'upload les affecte
+            // fetchProfile();
         } catch (err) {
-            const errorMsg = `Failed to upload file: ${err.response?.data?.message || 'Server error'}`;
+            console.error("Échec du téléversement du fichier:", err.response?.data || err.message);
+            const errorMsg = `Échec du téléversement du fichier : ${err.response?.data?.message || 'Une erreur serveur est survenue'}`;
             setError(prev => ({ ...prev, fileUpload: errorMsg }));
             toast.error(errorMsg);
         } finally { setLoading(prev => ({ ...prev, fileUpload: false })); }
     };
 
+    // Basculer le mode édition pour le profil
     const handleEditProfileToggle = () => {
         if (!isEditingProfile && profileData) {
+            // Remplir l'état modifiable en entrant en mode édition
             setEditableProfileData({
                 telephone: profileData.telephone || '',
                 date_de_naissance: profileData.date_de_naissance || '',
@@ -226,406 +361,457 @@ const handleLogout = () => {
                 allergies: profileData.allergies || '',
                 medical_history: profileData.medical_history || ''
             });
+        } else {
+            // Réinitialiser l'état modifiable si l'édition est annulée (optionnel)
+            setEditableProfileData({});
         }
         setIsEditingProfile(!isEditingProfile);
     };
 
+    // Mettre à jour l'état du profil modifiable lors du changement d'input
     const handleEditableProfileChange = (event) => {
-        setEditableProfileData(prev => ({ ...prev, [event.target.name]: event.target.value }));
+        const { name, value } = event.target;
+        setEditableProfileData(prev => ({ ...prev, [name]: value }));
     };
 
-    const openQuoteActionDialog = (status) => {
-        if (quoteData) {
-            setQuoteAction({ quoteId: quoteData.id, targetStatus: status });
+    // Ouvrir la modale de confirmation d'action sur le devis
+    const openQuoteActionDialog = (quoteId, status) => {
+        setQuoteAction({ quoteId, targetStatus: status });
+        setRefusalComment(''); // Réinitialiser le commentaire
+        setError(prev => ({ ...prev, dialog: null })); // Effacer les erreurs de dialogue précédentes
+        setIsQuoteActionDialogOpen(true);
+    };
+
+
+    // Fermer la modale de confirmation d'action sur le devis
+    const closeQuoteActionDialog = () => {
+        setIsQuoteActionDialogOpen(false);
+        // Réinitialiser l'état après la fermeture de la modale (ajouter un léger délai pour l'animation)
+        setTimeout(() => {
             setRefusalComment('');
-            setIsQuoteActionDialogOpen(true);
+            setQuoteAction({ quoteId: null, targetStatus: '' });
+            setError(prev => ({ ...prev, dialog: null })); // Effacer les erreurs de dialogue
+            setLoading(prev => ({ ...prev, action: false })); // S'assurer que l'état de chargement est réinitialisé
+        }, 300);
+    };
+
+    // --- Fonctions Utilitaires ---
+    const formatDate = (dateString) => {
+        if (!dateString) return 'N/A';
+        try {
+            // Utiliser un formatage plus robuste
+            return new Date(dateString).toLocaleString('fr-FR', { // Locale française
+                year: 'numeric', month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit', hour12: false // Ajuster le format si nécessaire
+            });
+        } catch (e) {
+            return 'Date Invalide';
         }
     };
 
-    const closeQuoteActionDialog = () => {
-        setIsQuoteActionDialogOpen(false);
-        setRefusalComment('');
-        setQuoteAction({ quoteId: null, targetStatus: '' });
-    };
-
-    const formatDate = (dateString) => {
-        return dateString ? new Date(dateString).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'N/A';
-    };
-
-    const getStatusChipColor = (status) => {
+    // Mapper le statut à une classe CSS pour les badges
+    const getStatusClass = (status) => {
         switch (status?.toLowerCase()) {
-            case 'pending': return 'warning';
-            case 'confirmed':
-            case 'completed': return 'success';
-            case 'cancelled':
-            case 'refused': return 'error';
+            case 'pending': return 'pending';
+            case 'confirmed': return 'confirmed';
+            case 'completed': return 'completed';
+            case 'accepted': return 'accepted'; // Ajouté pour les devis
+            case 'cancelled': return 'cancelled';
+            case 'refused': return 'refused'; // Ajouté pour les devis
             default: return 'default';
         }
     };
 
+    // Traduire le statut pour l'affichage
+    const translateStatus = (status) => {
+        switch (status?.toLowerCase()) {
+            case 'pending': return 'En attente';
+            case 'confirmed': return 'Confirmé';
+            case 'completed': return 'Terminé';
+            case 'accepted': return 'Accepté';
+            case 'cancelled': return 'Annulé';
+            case 'refused': return 'Refusé';
+            default: return status || 'N/A'; // Retourne le statut original ou N/A si vide
+        }
+    };
+
+
+    // Définir la section active et fermer la barre latérale sur mobile
+    const setSection = (section) => {
+        setActiveSection(section);
+        if (window.innerWidth < 992) { // Ajuster le point de rupture si nécessaire
+            setSidebarOpen(false);
+        }
+    };
+
+    // --- Logique de Rendu ---
+
+    // État de Chargement Initial
     if (loading.auth) {
         return (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-                <CircularProgress /><Typography sx={{ ml: 2 }}>Loading Your Dashboard...</Typography>
-            </Box>
+            <div className="loading-container dashboard-body"> {/* Utiliser dashboard-body pour un fond cohérent */}
+                <div className="simple-spinner"></div>
+                <p style={{ color: 'var(--text-light)', marginTop: '15px' }}>Chargement de votre tableau de bord...</p>
+            </div>
         );
     }
 
+    // État d'Erreur d'Authentification
     if (!userRole && !loading.auth) {
         return (
-            <Container sx={{ mt: 4 }}>
-                <Alert severity="error">{error.general || 'Access Denied.'}</Alert>
-                <Button component={RouterLink} to="/login" sx={{ mt: 2 }}>Go to Login</Button>
-            </Container>
+            <div className="error-container dashboard-body"> {/* Utiliser dashboard-body */}
+                <p>{error.general || 'Accès Refusé.'}</p>
+                {/* Utiliser RouterLink si installé, sinon ancre standard */}
+                <button onClick={() => navigate('/login')} className="action-button">Aller à la Connexion</button>
+            </div>
         );
     }
 
+    // Filtrer les rendez-vous en à venir et passés
     const now = new Date();
     const upcomingAppointments = appointments.filter(app => new Date(app.date_du_rdv) >= now);
     const pastAppointments = appointments.filter(app => new Date(app.date_du_rdv) < now);
 
     return (
-        <Box sx={{ display: 'flex', height: '100vh' }}>
+        <> {/* Utiliser Fragment au lieu de Box */}
             <ToastContainer position="top-right" autoClose={3000} theme="colored" />
 
-            {/* App Bar */}
-            <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
-                <Toolbar>
-                    <IconButton
-                        edge="start"
-                        color="inherit"
-                        aria-label="menu"
-                        onClick={() => setSidebarOpen(!sidebarOpen)}
-                        sx={{ mr: 2 }}
-                    >
-                        <MenuIcon />
-                    </IconButton>
-                    <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-                        Patient Dashboard ({userName})
-                    </Typography>
-                    <Button color="inherit" onClick={handleLogout} startIcon={<LogoutIcon />}>Logout</Button>
-                </Toolbar>
-            </AppBar>
+            <div className="dashboard-body">
+                {/* En-tête */}
+                <header className="dashboard-header">
+                    <button className="menu-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Basculer le menu">
+                        <MenuIcon /> {/* Garder l'icône Material UI ou remplacer par SVG */}
+                    </button>
+                    <div className="header-title">Tableau de Bord Patient ({userName})</div>
+                    <div className="header-actions">
+                        <button onClick={handleLogout} className="action-button button-outline">
+                            <LogoutIcon fontSize="small" style={{ marginRight: '5px' }} /> Déconnexion
+                        </button>
+                    </div>
+                </header>
 
-            {/* Sidebar Drawer */}
-            <Drawer
-                variant="persistent"
-                anchor="left"
-                open={sidebarOpen}
-                onClose={() => setSidebarOpen(false)}
-                sx={{
-                    width: 240,
-                    flexShrink: 0,
-                    [`& .MuiDrawer-paper`]: {
-                        width: 240,
-                        boxSizing: 'border-box',
-                        top: '64px',
-                        height: 'calc(100% - 64px)',
-                    },
-                }}
-            >
-                <Toolbar />
-                <Box sx={{ overflow: 'auto' }}>
-                    <List>
-                        <ListItem button selected={activeSection === 'profile'} onClick={() => setActiveSection('profile')}>
-                            <ListItemIcon><AssignmentIndIcon /></ListItemIcon>
-                            <ListItemText primary="My Profile" />
-                        </ListItem>
-                        <ListItem button selected={activeSection === 'quote'} onClick={() => setActiveSection('quote')}>
-                            <ListItemIcon><ReceiptLongIcon /></ListItemIcon>
-                            <ListItemText primary="My Quote" />
-                        </ListItem>
-                        <ListItem button selected={activeSection === 'appointments'} onClick={() => setActiveSection('appointments')}>
-                            <ListItemIcon><EventIcon /></ListItemIcon>
-                            <ListItemText primary="My Appointments" />
-                        </ListItem>
-                    </List>
-                </Box>
-            </Drawer>
+                {/* Wrapper Contenu Principal */}
+                <div className="main-content-wrapper">
+                    {/* Barre Latérale */}
+                    <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+                        {/* Boutons de Navigation de la Barre Latérale */}
+                        <button className={`sidebar-button ${activeSection === 'profile' ? 'active' : ''}`} onClick={() => setSection('profile')}>
+                            <AssignmentIndIcon /> Mon Profil
+                        </button>
+                        <button className={`sidebar-button ${activeSection === 'quote' ? 'active' : ''}`} onClick={() => setSection('quote')}>
+                            <ReceiptLongIcon /> Mes Devis
+                        </button>
+                        <button className={`sidebar-button ${activeSection === 'appointments' ? 'active' : ''}`} onClick={() => setSection('appointments')}>
+                            <EventIcon /> Mes Rendez-vous
+                        </button>
+                    </aside>
 
-            {/* Main Content Area */}
-            <Box
-                component="main"
-                sx={{
-                    flexGrow: 1,
-                    p: 3,
-                    mt: '64px',
-                    height: 'calc(100vh - 64px)',
-                    overflow: 'auto',
-                    transition: (theme) => theme.transitions.create('margin', {
-                        easing: theme.transitions.easing.sharp,
-                        duration: theme.transitions.duration.leavingScreen,
-                    }),
-                    marginLeft: sidebarOpen ? `240px` : 0,
-                }}
-            >
-                {error.general && (
-                    <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(prev => ({ ...prev, general: null }))}>
-                        {error.general}
-                    </Alert>
-                )}
+                    {/* Zone de Contenu Principal */}
+                    <main className="content-area">
+                        {/* Overlay pour fermer la barre latérale sur mobile */}
+                        {sidebarOpen && <div className="content-overlay" onClick={() => setSidebarOpen(false)}></div>}
 
-                {/* Profile Section */}
-                {activeSection === 'profile' && (
-                    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                        <CardHeader
-    avatar={<AssignmentIndIcon />}
-    title="My Profile & Medical Info"
-/>
+                        {/* Affichage Erreur Générale */}
+                        {error.general && (
+                            <div className="alert-message alert-message-error">
+                                <span>{error.general}</span>
+                                <button className="alert-close-btn" onClick={() => setError(prev => ({ ...prev, general: null }))}>×</button>
+                            </div>
+                        )}
 
-<CardContent sx={{ flexGrow: 1 }}>
-    {loading.profile ? (
-        <Box>
-            <Skeleton variant="text" width="80%" />
-            <Skeleton variant="text" width="60%" />
-            <Skeleton variant="text" width="70%" sx={{ mt: 1 }} />
-            <Skeleton variant="rectangular" height={80} sx={{ mt: 1 }} />
-        </Box>
-    ) : error.profile ? (
-        <Alert severity="warning">{error.profile}</Alert>
-    ) : profileData ? (
-        <>
-            <List dense disablePadding>
-                <ListItem><ListItemText primary="Name" secondary={`${profileData.name} ${profileData.last_name}`} /></ListItem>
-                <ListItem><ListItemText primary="Email" secondary={profileData.email} /></ListItem>
-                <ListItem><ListItemText primary="Telephone" secondary={profileData.telephone || 'Not Provided'} /></ListItem>
-                <ListItem><ListItemText primary="Date of Birth" secondary={profileData.date_de_naissance ? new Date(profileData.date_de_naissance).toLocaleDateString() : 'Not Provided'} /></ListItem>
-                <ListItem><ListItemText primary="Address" secondary={profileData.adresse || 'Not Provided'} sx={{ '& .MuiListItemText-secondary': { whiteSpace: 'pre-wrap' } }} /></ListItem>
-                <Divider sx={{ my: 1 }} />
-                <Typography variant="subtitle2" sx={{ pl: 2, pt: 1 }}>Medical Info</Typography>
-                <ListItem><ListItemText primary="Allergies" secondary={profileData.allergies || 'None specified'} sx={{ '& .MuiListItemText-secondary': { whiteSpace: 'pre-wrap' } }} /></ListItem>
-                <ListItem><ListItemText primary="Medical History Notes" secondary={profileData.medical_history || 'None specified'} sx={{ '& .MuiListItemText-secondary': { whiteSpace: 'pre-wrap' } }} /></ListItem>
-            </List>
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="subtitle2" sx={{ pl: 2, mb: 1 }}>Upload Medical Document (PDF only)</Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, px: 2 }}>
-                <Button variant="outlined" component="label" startIcon={<DescriptionIcon />} size="small" disabled={loading.fileUpload}>
-                    Choose PDF
-                    <Input id="medical-file-input" type="file" hidden onChange={handleFileChange} accept=".pdf" />
-                </Button>
-                {selectedFile && (
-                    <Typography variant="body2" sx={{ flexGrow: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {selectedFile.name}
-                    </Typography>
-                )}
-                <Button
-                    variant="contained"
-                    color="primary"
-                    startIcon={loading.fileUpload ? <CircularProgress size={16} color="inherit" /> : <UploadFileIcon />}
-                    onClick={handleFileUpload}
-                    disabled={!selectedFile || loading.fileUpload}
-                    size="small"
-                >
-                    Upload
-                </Button>
-            </Box>
-            {error.fileUpload && <Alert severity="error" sx={{ mt: 1, mx: 2 }}>{error.fileUpload}</Alert>}
-        </>
-    ) : (
-        <Typography>No profile data available.</Typography>
-    )}
-</CardContent>
+                        {/* Section Profil */}
+                        {activeSection === 'profile' && (
+                            <section className="content-section">
+                                <div className="section-header">
+                                    <h3><AssignmentIndIcon style={{ verticalAlign: 'middle', marginRight: '8px' }} /> Mon Profil & Infos Médicales</h3>
+                                    <button onClick={handleEditProfileToggle} className="action-button button-small button-outline">
+                                        <EditIcon fontSize="small" style={{ marginRight: '4px' }} /> {isEditingProfile ? 'Annuler la Modification' : 'Modifier le Profil'}
+                                    </button>
+                                </div>
 
-                    </Card>
-                )}
+                                {loading.profile ? (
+                                    <div style={{ textAlign: 'center', padding: '30px' }}><div className="simple-spinner"></div></div>
+                                ) : error.profile ? (
+                                    <div className="alert-message alert-message-warning"><span>{error.profile}</span></div>
+                                ) : profileData ? (
+                                    <>
+                                        {/* Mode Affichage */}
+                                        {!isEditingProfile && (
+                                            <div className="list-group">
+                                                <div className="list-item"><strong>Nom :</strong> {profileData.name} {profileData.last_name}</div>
+                                                <div className="list-item"><strong>Email :</strong> {profileData.email}</div>
+                                                <div className="list-item"><strong>Téléphone :</strong> {profileData.telephone || 'Non fourni'}</div>
+                                                <div className="list-item"><strong>Date de Naissance :</strong> {profileData.date_de_naissance ? new Date(profileData.date_de_naissance).toLocaleDateString('fr-FR') : 'Non fournie'}</div>
+                                                <div className="list-item"><strong>Adresse :</strong> <pre>{profileData.adresse || 'Non fournie'}</pre></div>
+                                                <hr style={{ margin: '15px 0' }} />
+                                                <h4>Infos Médicales</h4>
+                                                <div className="list-item"><strong>Allergies :</strong> <pre>{profileData.allergies || 'Aucune spécifiée'}</pre></div>
+                                                <div className="list-item"><strong>Antécédents Médicaux :</strong> <pre>{profileData.medical_history || 'Aucun spécifié'}</pre></div>
+                                            </div>
+                                        )}
 
-                {/* Quote Section */}
-                {activeSection === 'quote' && (
-                    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                        <CardHeader avatar={<ReceiptLongIcon />} title="My Quote" />
-                        <CardContent sx={{ flexGrow: 1 }}>
-                            {loading.quote ? (
-                                <Box><Skeleton variant="text" width="50%" /><Skeleton variant="text" width="70%" /><Skeleton variant="text" width="40%" /></Box>
-                            ) : error.quote ? (
-                                <Alert severity="warning">{error.quote}</Alert>
-                            ) : quoteData ? (
-                                <Box>
-                                    <Typography variant="h6" gutterBottom>Amount: <em>See PDF</em></Typography>
-                                    {quoteData.file_path && (
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                                            <Typography variant="subtitle1" gutterBottom>Quote PDF:</Typography>
-                                            <Button
-                                                variant="outlined"
-                                                size="small"
-                                                startIcon={<DescriptionIcon />}
-                                                onClick={async () => {
-                                                    try {
-                                                        const token = localStorage.getItem('token');
-                                                        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api'}/patient/quotes/${quoteData.id}/download`, {
-                                                            headers: { Authorization: `Bearer ${token}`, Accept: 'application/pdf' }
-                                                        });
-                                                        if (!response.ok) throw new Error(`Download failed (${response.status})`);
-                                                        const blob = await response.blob();
-                                                        const url = window.URL.createObjectURL(blob);
-                                                        const a = document.createElement('a');
-                                                        a.href = url;
-                                                        a.download = quoteData.filename || `quote_${quoteData.id}.pdf`;
-                                                        document.body.appendChild(a);
-                                                        a.click();
-                                                        document.body.removeChild(a);
-                                                        window.URL.revokeObjectURL(url);
-                                                    } catch (err) {
-                                                        toast.error(`Could not download PDF. ${err.message}`);
-                                                    }
-                                                }}
+                                        {/* Mode Édition */}
+                                        {isEditingProfile && (
+                                            <div className="form-grid">
+                                                <div className="form-group">
+                                                    <label htmlFor="telephone">Téléphone</label>
+                                                    <input type="tel" id="telephone" name="telephone" value={editableProfileData.telephone} onChange={handleEditableProfileChange} />
+                                                </div>
+                                                <div className="form-group">
+                                                    <label htmlFor="date_de_naissance">Date de Naissance</label>
+                                                    <input type="date" id="date_de_naissance" name="date_de_naissance" value={editableProfileData.date_de_naissance} onChange={handleEditableProfileChange} />
+                                                </div>
+                                                <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                                                    <label htmlFor="adresse">Adresse</label>
+                                                    <textarea id="adresse" name="adresse" rows="3" value={editableProfileData.adresse} onChange={handleEditableProfileChange}></textarea>
+                                                </div>
+                                                <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                                                    <label htmlFor="allergies">Allergies</label>
+                                                    <textarea id="allergies" name="allergies" rows="3" value={editableProfileData.allergies} onChange={handleEditableProfileChange}></textarea>
+                                                </div>
+                                                <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                                                    <label htmlFor="medical_history">Antécédents Médicaux</label>
+                                                    <textarea id="medical_history" name="medical_history" rows="4" value={editableProfileData.medical_history} onChange={handleEditableProfileChange}></textarea>
+                                                </div>
+                                                <div style={{ gridColumn: '1 / -1', textAlign: 'right', marginTop: '10px' }}>
+                                                    <button onClick={handleProfileUpdate} className="action-button confirm-button" disabled={loading.action}>
+                                                        {loading.action ? <div className="button-spinner"></div> : 'Enregistrer les Modifications'}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Section Téléversement Fichier (Toujours Visible) */}
+                                        <hr style={{ margin: '25px 0' }} />
+                                        <h4>Envoyer un Document Médical (PDF uniquement)</h4>
+                                        <div className="file-upload-area">
+                                            <input
+                                                type="file"
+                                                id="medical-file-input"
+                                                ref={fileInputRef}
+                                                onChange={handleFileChange}
+                                                accept=".pdf"
+                                                style={{ display: 'none' }} // Cacher l'input par défaut
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => fileInputRef.current?.click()}
+                                                className="action-button button-outline"
+                                                disabled={loading.fileUpload}
                                             >
-                                                {quoteData.filename || 'Download'}
-                                            </Button>
-                                        </Box>
-                                    )}
-                                    <Typography variant="body1" gutterBottom>
-                                        Status: <Chip label={quoteData.status || 'N/A'} size="small" color={getStatusChipColor(quoteData.status)} variant={quoteData.status === 'pending' ? 'outlined' : 'filled'} />
-                                    </Typography>
-                                    {quoteData.status === 'refused' && quoteData.comment && (
-                                        <Typography variant="body2" sx={{ mt: 1, fontStyle: 'italic', color: 'text.secondary' }}>
-                                            Refusal Reason: {quoteData.comment}
-                                        </Typography>
-                                    )}
-                                    <Divider sx={{ my: 2 }} />
-                                    <Typography variant="subtitle2" gutterBottom>Related Appointment:</Typography>
-                                    {quoteContext ? (
-                                        <List dense disablePadding>
-                                            <ListItem><ListItemText primary="Service" secondary={quoteContext.service || 'N/A'} /></ListItem>
-                                            <ListItem><ListItemText primary="Date" secondary={formatDate(quoteContext.date_du_rdv)} /></ListItem>
-                                            <ListItem><ListItemText primary="Agent" secondary={quoteContext.agent ? `${quoteContext.agent.name} ${quoteContext.agent.last_name}` : 'N/A'} /></ListItem>
-                                            <ListItem><ListItemText primary="Clinic" secondary={quoteContext.clinique?.name || 'N/A'} /></ListItem>
-                                        </List>
-                                    ) : (
-                                        <Typography color="text.secondary" sx={{ pl: 2 }}>Details not available.</Typography>
-                                    )}
-                                    {(!quoteData.status || quoteData.status === 'pending') && (
-                                        <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-around' }}>
-                                            <Button variant="contained" color="success" startIcon={<CheckCircleIcon />} onClick={() => openQuoteActionDialog('accepted')} disabled={loading.action}>Accept Quote</Button>
-                                            <Button variant="contained" color="error" startIcon={<CancelIcon />} onClick={() => openQuoteActionDialog('refused')} disabled={loading.action}>Refuse Quote</Button>
-                                        </Box>
-                                    )}
-                                </Box>
-                            ) : (
-                                <Typography color="text.secondary">No quote found associated with your appointments.</Typography>
-                            )}
-                        </CardContent>
-                    </Card>
-                )}
+                                                <DescriptionIcon fontSize="small" style={{ marginRight: '5px' }} /> Choisir PDF
+                                            </button>
+                                            {selectedFile && <span className="file-name">{selectedFile.name}</span>}
+                                            <button
+                                                type="button"
+                                                onClick={handleFileUpload}
+                                                className="action-button"
+                                                disabled={!selectedFile || loading.fileUpload}
+                                            >
+                                                {loading.fileUpload ? <div className="button-spinner"></div> : <><UploadFileIcon fontSize="small" style={{ marginRight: '5px' }} /> Envoyer</>}
+                                            </button>
+                                        </div>
+                                        {error.fileUpload && <div className="alert-message alert-message-error" style={{ marginTop: '10px' }}><span>{error.fileUpload}</span></div>}
+                                    </>
+                                ) : (
+                                    <p>Aucune donnée de profil disponible.</p>
+                                )}
+                            </section>
+                        )}
 
-                {/* Appointments Section */}
-                {activeSection === 'appointments' && (
-                    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                        <CardHeader avatar={<EventIcon />} title="My Appointments" />
-                        <CardContent sx={{ flexGrow: 1 }}>
-                            {loading.appointments ? (
-                                <Box>
-                                    <Skeleton variant="text" width="40%" />
-                                    <Skeleton variant="rectangular" height={60} sx={{ mt: 1 }} />
-                                    <Skeleton variant="text" width="40%" sx={{ mt: 2 }} />
-                                    <Skeleton variant="rectangular" height={60} sx={{ mt: 1 }} />
-                                </Box>
-                            ) : error.appointments ? (
-                                <Alert severity="warning">{error.appointments}</Alert>
-                            ) : appointments.length > 0 ? (
-                                <Box>
-                                    {upcomingAppointments.length > 0 && (
-                                        <>
-                                            <Typography variant="h6" gutterBottom>Upcoming</Typography>
-                                            <TableContainer component={Paper} elevation={2} sx={{ mb: 3 }}>
-                                                <Table size="small">
-                                                    <TableHead>
-                                                        <TableRow>
-                                                            <TableCell>Date & Time</TableCell>
-                                                            <TableCell>Service</TableCell>
-                                                            <TableCell>Clinic</TableCell>
-                                                            <TableCell>Status</TableCell>
-                                                        </TableRow>
-                                                    </TableHead>
-                                                    <TableBody>
-                                                        {upcomingAppointments.map((app) => (
-                                                            <TableRow key={app.id}>
-                                                                <TableCell>{formatDate(app.date_du_rdv)}</TableCell>
-                                                                <TableCell>{app.service || 'N/A'}</TableCell>
-                                                                <TableCell>{app.clinique?.name || 'N/A'}</TableCell>
-                                                                <TableCell><Chip label={app.status || 'N/A'} size="small" color={getStatusChipColor(app.status)} variant={app.status === 'pending' ? 'outlined' : 'filled'} /></TableCell>
-                                                            </TableRow>
-                                                        ))}
-                                                    </TableBody>
-                                                </Table>
-                                            </TableContainer>
-                                        </>
-                                    )}
-                                    {pastAppointments.length > 0 && (
-                                        <>
-                                            <Typography variant="h6" gutterBottom>Past</Typography>
-                                            <TableContainer component={Paper} elevation={2}>
-                                                <Table size="small">
-                                                    <TableHead>
-                                                        <TableRow>
-                                                            <TableCell>Date & Time</TableCell>
-                                                            <TableCell>Service</TableCell>
-                                                            <TableCell>Clinic</TableCell>
-                                                            <TableCell>Status</TableCell>
-                                                        </TableRow>
-                                                    </TableHead>
-                                                    <TableBody>
-                                                        {pastAppointments.map((app) => (
-                                                            <TableRow key={app.id}>
-                                                                <TableCell>{formatDate(app.date_du_rdv)}</TableCell>
-                                                                <TableCell>{app.service || 'N/A'}</TableCell>
-                                                                <TableCell>{app.clinique?.name || 'N/A'}</TableCell>
-                                                                <TableCell><Chip label={app.status || 'N/A'} size="small" color={getStatusChipColor(app.status)} variant={app.status === 'pending' ? 'outlined' : 'filled'} /></TableCell>
-                                                            </TableRow>
-                                                        ))}
-                                                    </TableBody>
-                                                </Table>
-                                            </TableContainer>
-                                        </>
-                                    )}
-                                    {upcomingAppointments.length === 0 && pastAppointments.length === 0 && (
-                                        <Typography color="text.secondary">You have no appointments scheduled.</Typography>
-                                    )}
-                                </Box>
-                            ) : (
-                                <Typography color="text.secondary">No appointment history found.</Typography>
-                            )}
-                        </CardContent>
-                    </Card>
-                )}
-            </Box>
+                        {/* Section Devis */}
+                        {activeSection === 'quote' && (
+                            <section className="content-section">
+                                <div className="section-header">
+                                    <h3><ReceiptLongIcon style={{ verticalAlign: 'middle', marginRight: '8px' }} /> Mes Devis</h3>
+                                </div>
 
-            {/* Quote Action Dialog */}
-            <Dialog open={isQuoteActionDialogOpen} onClose={closeQuoteActionDialog}>
-                <DialogTitle>Confirm Quote Decision</DialogTitle>
-                <DialogContent>
-                    <DialogContentText>
-                        Are you sure you want to <Box component="span" sx={{ fontWeight: 'bold' }}>{quoteAction.targetStatus}</Box> this quote?
-                        {quoteAction.targetStatus === 'accepted' && ' This action might be final.'}
-                    </DialogContentText>
-                    {quoteAction.targetStatus === 'refused' && (
-                        <TextField
-                            autoFocus
-                            margin="dense"
-                            label="Reason for Refusal"
-                            type="text"
-                            fullWidth
-                            multiline
-                            rows={3}
-                            variant="standard"
+                                {loading.quote ? (
+                                    <div style={{ textAlign: 'center', padding: '30px' }}><div className="simple-spinner"></div></div>
+                                ) : error.quote ? (
+                                    <div className="alert-message alert-message-warning"><span>{error.quote}</span></div>
+                                ) : quoteData?.length > 0 ? (
+                                    quoteData
+                                        .filter(({ quote }) => !!quote?.file_path) // ✅ filtrer les devis sans PDF
+                                        .map(({ quote, appointment }) => ( // Assurez-vous que 'appointment' est bien passé ici depuis l'API
+
+                                            <div key={quote.id} className="quote-card">
+                                                <div className="list-group">
+                                                    <div className="list-item"><strong>ID Devis :</strong> {quote.id}</div>
+                                                    <div className="list-item"><strong>Statut :</strong> <span className={`status-badge ${getStatusClass(quote.status)}`}>{translateStatus(quote.status)}</span></div>
+                                                    <div className="list-item"><strong>Nom du fichier :</strong> {quote.filename || 'N/A'}</div>
+                                                    {/* Vérifier si 'appointment' existe avant d'accéder à ses propriétés */}
+                                                    <div className="list-item"><strong>Date Rendez-vous :</strong> {appointment ? formatDate(appointment.date_du_rdv) : 'N/A'}</div>
+                                                    <div className="list-item"><strong>Service :</strong> {appointment?.service || 'N/A'}</div>
+                                                    <div className="list-item"><strong>Agent :</strong> {appointment?.agent?.name} {appointment?.agent?.last_name || 'N/A'}</div>
+                                                    <div className="list-item"><strong>Clinique :</strong> {appointment?.clinique?.name || 'N/A'}</div>
+                                                    <div className="list-item">
+                                                        <button
+                                                            className="action-button button-small button-outline"
+                                                            onClick={async () => {
+                                                                try {
+                                                                    const token = localStorage.getItem('token');
+                                                                    // S'assurer que baseURL se termine par /api ou non, ajuster si nécessaire
+                                                                    const downloadUrl = `${apiClient.defaults.baseURL}/patient/quotes/${quote.id}/download`;
+                                                                    const response = await fetch(downloadUrl, {
+                                                                        headers: { Authorization: `Bearer ${token}` }
+                                                                    });
+                                                                    if (!response.ok) {
+                                                                        throw new Error(`Erreur serveur: ${response.statusText}`);
+                                                                    }
+                                                                    const blob = await response.blob();
+                                                                    const url = URL.createObjectURL(blob);
+                                                                    const a = document.createElement('a');
+                                                                    a.href = url;
+                                                                    a.download = quote.filename || `devis_${quote.id}.pdf`;
+                                                                    document.body.appendChild(a); // Nécessaire pour Firefox
+                                                                    a.click();
+                                                                    a.remove(); // Nettoyer
+                                                                    URL.revokeObjectURL(url);
+                                                                } catch (err) {
+                                                                    console.error("Erreur téléchargement PDF:", err);
+                                                                    toast.error("Échec du téléchargement du PDF.");
+                                                                }
+                                                            }}
+                                                        >
+                                                            <DescriptionIcon fontSize="inherit" style={{ marginRight: '4px' }} /> Télécharger PDF
+                                                        </button>
+                                                    </div>
+
+                                                    {quote.status === 'refused' && quote.comment && (
+                                                        <div className="list-item" style={{ fontStyle: 'italic' }}>Motif du Refus : {quote.comment}</div>
+                                                    )}
+
+                                                    {/* Afficher les boutons seulement si le statut est 'pending' ou null/undefined */}
+                                                    {(quote.status === 'pending' || !quote.status) && (
+                                                        <div className="list-item action-row">
+                                                            <button className="action-button button-success" onClick={() => openQuoteActionDialog(quote.id, 'accepted')} disabled={loading.action}>
+                                                                <CheckCircleIcon fontSize="small" style={{ marginRight: '5px' }} /> Accepter
+                                                            </button>
+                                                            <button className="action-button button-warning" onClick={() => openQuoteActionDialog(quote.id, 'refused')} disabled={loading.action}>
+                                                                <CancelIcon fontSize="small" style={{ marginRight: '5px' }} /> Refuser
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <hr />
+                                            </div>
+                                        ))
+                                ) : (
+                                    <p style={{ color: 'var(--text-light)' }}>Aucun devis disponible.</p>
+                                )}
+                            </section>
+                        )}
+
+                        {/* Section Rendez-vous */}
+                        {activeSection === 'appointments' && (
+                            <section className="content-section">
+                                <div className="section-header">
+                                    <h3><EventIcon style={{ verticalAlign: 'middle', marginRight: '8px' }} /> Mes Rendez-vous</h3>
+                                </div>
+                                {loading.appointments ? (
+                                    <div style={{ textAlign: 'center', padding: '30px' }}><div className="simple-spinner"></div></div>
+                                ) : error.appointments ? (
+                                    <div className="alert-message alert-message-warning"><span>{error.appointments}</span></div>
+                                ) : appointments.length > 0 ? (
+                                    <div>
+                                        {upcomingAppointments.length > 0 && (
+                                            <>
+                                                <h4>À venir</h4>
+                                                <div className="table-container responsive">
+                                                    <table className="styled-table">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>Date & Heure</th>
+                                                                <th>Service</th>
+                                                                <th>Clinique</th>
+                                                                <th>Statut</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {upcomingAppointments.map((app) => (
+                                                                <tr key={app.id}>
+                                                                    <td>{formatDate(app.date_du_rdv)}</td>
+                                                                    <td>{app.service || 'N/A'}</td>
+                                                                    <td>{app.clinique?.name || 'N/A'}</td>
+                                                                    <td><span className={`status-badge ${getStatusClass(app.status)}`}>{translateStatus(app.status)}</span></td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </>
+                                        )}
+                                        {pastAppointments.length > 0 && (
+                                            <>
+                                                <h4 style={{ marginTop: upcomingAppointments.length > 0 ? '30px' : '0' }}>Passés</h4>
+                                                <div className="table-container responsive">
+                                                    <table className="styled-table">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>Date & Heure</th>
+                                                                <th>Service</th>
+                                                                <th>Clinique</th>
+                                                                <th>Statut</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {pastAppointments.map((app) => (
+                                                                <tr key={app.id}>
+                                                                    <td>{formatDate(app.date_du_rdv)}</td>
+                                                                    <td>{app.service || 'N/A'}</td>
+                                                                    <td>{app.clinique?.name || 'N/A'}</td>
+                                                                    <td><span className={`status-badge ${getStatusClass(app.status)}`}>{translateStatus(app.status)}</span></td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </>
+                                        )}
+                                        {upcomingAppointments.length === 0 && pastAppointments.length === 0 && (
+                                            <p style={{ color: 'var(--text-light)' }}>Vous n'avez aucun rendez-vous planifié.</p>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <p style={{ color: 'var(--text-light)' }}>Aucun historique de rendez-vous trouvé.</p>
+                                )}
+                            </section>
+                        )}
+
+                    </main> {/* Fin Zone Contenu */}
+                </div> {/* Fin Wrapper Contenu Principal */}
+            </div> {/* Fin Dashboard Body */}
+
+            {/* Modale Confirmation Action Devis */}
+            <ConfirmationModal
+                isOpen={isQuoteActionDialogOpen}
+                onClose={closeQuoteActionDialog}
+                onConfirm={handleQuoteStatusUpdate}
+                title="Confirmer la Décision sur le Devis"
+                message={`Êtes-vous sûr de vouloir ${quoteAction.targetStatus === 'accepted' ? 'accepter' : 'refuser'} ce devis ? ${quoteAction.targetStatus === 'accepted' ? ' Cette action pourrait être définitive.' : ''}`}
+                confirmText={`Oui, ${quoteAction.targetStatus === 'accepted' ? 'Accepter' : 'Refuser'}`}
+                cancelText="Annuler" // Texte du bouton Annuler
+                isLoading={loading.action}
+            >
+                {/* Rendre conditionnellement le champ de commentaire dans le corps de la modale */}
+                {quoteAction.targetStatus === 'refused' && (
+                    <div className="form-group" style={{ marginTop: '15px' }}>
+                        <label htmlFor="refusalComment">Motif du Refus (Obligatoire)</label>
+                        <textarea
+                            id="refusalComment"
+                            rows="3"
                             value={refusalComment}
                             onChange={(e) => setRefusalComment(e.target.value)}
-                            sx={{ mt: 2 }}
-                        />
-                    )}
-                </DialogContent>
-                <DialogActions sx={{ px: 3, pb: 2 }}>
-                    <Button onClick={closeQuoteActionDialog} disabled={loading.action}>Cancel</Button>
-                    <Button
-                        onClick={handleQuoteStatusUpdate}
-                        color={quoteAction.targetStatus === 'accepted' ? 'success' : 'error'}
-                        variant="contained"
-                        disabled={loading.action}
-                    >
-                        {loading.action ? <CircularProgress size={20} color="inherit" /> : `Yes, ${quoteAction.targetStatus === 'accepted' ? 'Accept' : 'Refuse'}`}
-                    </Button>
-                </DialogActions>
-            </Dialog>
-        </Box>
+                            placeholder="Veuillez fournir une brève raison"
+                            required
+                            autoFocus
+                        ></textarea>
+                        {error.dialog && <p className="alert-message alert-message-error" style={{ fontSize: '0.9em', marginTop: '5px', marginBottom: '0' }}>{error.dialog}</p>}
+                    </div>
+                )}
+            </ConfirmationModal>
+        </>
     );
 }
 

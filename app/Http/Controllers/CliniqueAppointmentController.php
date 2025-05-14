@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use App\Models\Appointment;
+use App\Events\ClinicQuoteUploaded;
 
 class CliniqueAppointmentController extends Controller
 {
@@ -31,31 +32,35 @@ class CliniqueAppointmentController extends Controller
 
 
     // POST /clinique/appointments/{id}/upload-quote
-    public function uploadQuote(Request $request, $appointmentId)
-    {
-        $request->validate([
-            'file' => 'required|file|mimes:pdf|max:20480',
-        ]);
+   public function uploadQuote(Request $request, $appointmentId)
+{
+    $request->validate([
+        'file' => 'required|file|mimes:pdf|max:20480',
+    ]);
 
-        $appointment = Appointment::where('id', $appointmentId)
-            ->where('clinique_id', $request->user()->id)
-            ->firstOrFail();
+    $appointment = Appointment::where('id', $appointmentId)
+        ->where('clinique_id', $request->user()->id)
+        ->firstOrFail();
 
-        // Delete old file if exists
-        if ($appointment->clinic_quote_file) {
-            Storage::disk('public')->delete($appointment->clinic_quote_file);
-        }
-
-        $path = $request->file('file')->store('clinic-quotes', 'public');
-
-        $appointment->clinic_quote_file = $path;
-        $appointment->save();
-
-        return response()->json([
-            'message' => 'Clinic quote uploaded successfully.',
-            'file_url' => Storage::disk('public')->url($path),
-        ]);
+    // Delete old file if exists
+    if ($appointment->clinic_quote_file) {
+        Storage::disk('public')->delete($appointment->clinic_quote_file);
     }
+
+    $path = $request->file('file')->store('clinic-quotes', 'public');
+
+    $appointment->clinic_quote_file = $path;
+    $appointment->save();
+
+    // ✅ Dispatch broadcast event
+    event(new ClinicQuoteUploaded($appointment));
+
+    return response()->json([
+        'message' => 'Clinic quote uploaded successfully.',
+        'file_url' => Storage::disk('public')->url($path),
+    ]);
+}
+
 
     public function deleteQuote(Request $request, $appointmentId)
 {

@@ -11,115 +11,117 @@ use Illuminate\Validation\Rule;
 class PatientQuoteController extends Controller
 {
     /**
-     * Display the quote associated with the authenticated patient's most recent appointment.
+     * Return all quotes associated with the authenticated patient's appointments.
      */
-    public function show(Request $request)
+    public function index(Request $request)
     {
         $patientId = Auth::id();
 
-        // Find the latest appointment for this patient that HAS a quote
-        $appointmentWithQuote = Appointment::where('patient_id', $patientId)
-            ->whereHas('quote')
-            ->with([
-                'quote',
-                'agent:id,name,last_name',
-                'clinique:id,name'
-            ])
-            ->latest('date_du_rdv')
-            ->first();
+        $appointmentsWithQuotes = Appointment::where('patient_id', $patientId)
+    ->whereHas('quote', function ($q) {
+    $q->whereNotNull('sent_to_patient_at')
+      ->whereNotNull('file_path'); // Only include quotes that have files
+})
+    ->with(['quote', 'agent:id,name,last_name', 'clinique:id,name'])
+    ->orderByDesc('date_du_rdv')
+    ->get();
 
-        if (!$appointmentWithQuote || !$appointmentWithQuote->quote) {
-            return response()->json(['message' => 'No quote found for your appointments.'], 404);
+
+        if ($appointmentsWithQuotes->isEmpty()) {
+            return response()->json(['message' => 'No quotes found for your appointments.'], 404);
         }
 
-        return response()->json([
-            'quote' => [
-                'id' => $appointmentWithQuote->quote->id,
-                'status' => $appointmentWithQuote->quote->status,
-                'amount' => $appointmentWithQuote->quote->amount, // ✅ Ensure this is returned
-                'comment' => $appointmentWithQuote->quote->comment,
-                'filename' => $appointmentWithQuote->quote->filename, // ✅ Optional for display
-                'file_path' => $appointmentWithQuote->quote->file_path, // ✅ Needed for PDF download
-            ],
-            'appointment' => [
-                'id' => $appointmentWithQuote->id,
-                'service' => $appointmentWithQuote->service,
-                'date_du_rdv' => $appointmentWithQuote->date_du_rdv,
-                'agent' => $appointmentWithQuote->agent,
-                'clinique' => $appointmentWithQuote->clinique,
-            ]
-        ]);
-        
+        $results = $appointmentsWithQuotes->map(function ($appt) {
+            return [
+                'quote' => [
+                    'id' => $appt->quote->id,
+                    'status' => $appt->quote->status,
+                    'amount' => $appt->quote->amount,
+                    'comment' => $appt->quote->comment,
+                    'filename' => $appt->quote->filename ?? basename($appt->quote->file_path ?? ''),
+
+                    'file_path' => $appt->quote->file_path,
+                ],
+                'appointment' => [
+                    'id' => $appt->id,
+                    'service' => $appt->service,
+                    'date_du_rdv' => $appt->date_du_rdv,
+                    'agent' => $appt->agent,
+                    'clinique' => $appt->clinique,
+                ]
+            ];
+        });
+
+        return response()->json($results);
     }
 
     /**
-     * Update the status of the specified quote (accept or refuse) with optional rejection comment.
+     * Update the status of the specified quote (accept or refuse).
      */
     public function updateStatus(Request $request, $quoteId)
-{
-    $patientId = Auth::id(); // ✅ Add this line
+    {
+        $patientId = Auth::id();
 
-    $rules = [
-        'status' => ['required', 'string', Rule::in(['accepted', 'refused'])],
-    ];
-    
-    if ($request->input('status') === 'refused') {
-        $rules['comment'] = 'required|string|max:1000';
-    } else {
-        $rules['comment'] = 'nullable|string|max:1000';
-    }
-    
-    $validatedData = $request->validate($rules);
-    
-    $quote = Quote::find($quoteId);
+        $rules = [
+            'status' => ['required', 'string', Rule::in(['accepted', 'refused'])],
+            'comment' => 'nullable|string|max:1000',
+        ];
 
-    if (!$quote) {
-        return response()->json(['message' => 'Quote not found.'], 404);
-    }
+        if ($request->input('status') === 'refused') {
+            $rules['comment'] = 'required|string|max:1000';
+        }
 
-    $appointment = $quote->appointment;
-    if (!$appointment || $appointment->patient_id !== $patientId) {
-        return response()->json(['message' => 'Forbidden: You cannot modify this quote.'], 403);
-    }
+        $validatedData = $request->validate($rules);
 
-    if (in_array($quote->status, ['accepted', 'refused'])) {
-        return response()->json(['message' => 'Quote status has already been finalized.'], 400);
-    }
+        $quote = Quote::find($quoteId);
 
-    $quote->status = $validatedData['status'];
+        if (!$quote) {
+            return response()->json(['message' => 'Quote not found.'], 404);
+        }
 
-    // Store comment if refused
-    if ($validatedData['status'] === 'refused') {
-        $quote->comment = $validatedData['comment'];
-    }
+        $appointment = $quote->appointment;
+        if (!$appointment || $appointment->patient_id !== $patientId) {
+            return response()->json(['message' => 'Forbidden: You cannot modify this quote.'], 403);
+        }
 
-    $quote->save();
+        if (in_array($quote->status, ['accepted', 'refused'])) {
+            return response()->json(['message' => 'Quote status has already been finalized.'], 400);
+        }
 
-    return response()->json($quote);
-}
-public function download($id)
-{
-    $user = Auth::user();
-    $quote = Quote::with('appointment')->findOrFail($id);
+        $quote->status = $validatedData['status'];
 
-    // ✅ Ensure quote belongs to the current patient
-    if (!$quote->appointment || $quote->appointment->patient_id !== $user->id) {
-        return response()->json(['error' => 'Unauthorized access.'], 403);
+        if ($validatedData['status'] === 'refused') {
+            $quote->comment = $validatedData['comment'];
+        }
+
+        $quote->save();
+
+        return response()->json($quote);
     }
 
-    if (!$quote->file_path) {
-        return response()->json(['error' => 'File not found.'], 404);
+    /**
+     * Download a quote PDF (ensures access is restricted to owner).
+     */
+    public function download($id)
+    {
+        $user = Auth::user();
+        $quote = Quote::with('appointment')->findOrFail($id);
+
+        if (!$quote->appointment || $quote->appointment->patient_id !== $user->id) {
+            return response()->json(['error' => 'Unauthorized access.'], 403);
+        }
+
+        if (!$quote->file_path) {
+            return response()->json(['error' => 'File not found.'], 404);
+        }
+
+        $filePath = storage_path('app/public/' . $quote->file_path);
+
+        if (!file_exists($filePath)) {
+            return response()->json(['error' => 'File does not exist on server.'], 404);
+        }
+
+        $filename = $quote->filename ?? basename($quote->file_path) ?? 'quote.pdf';
+        return response()->download($filePath, $filename);
     }
-
-    $filePath = storage_path('app/public/' . $quote->file_path);
-
-    if (!file_exists($filePath)) {
-        return response()->json(['error' => 'File does not exist on server.'], 404);
-    }
-
-    $filename = $quote->filename ?? basename($quote->file_path) ?? 'quote.pdf';
-    return response()->download($filePath, $filename);
-}
-
-
 }

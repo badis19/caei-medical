@@ -5,40 +5,39 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Quote extends Model
 {
     use HasFactory;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
-     */
     protected $fillable = [
         'appointment_id',
-        'file_path', // New field for PDF file path
+        'file_path',
+        'filename',
         'status',
         'comment',
+        'clinique_quote_path',
+        'total_clinique',
+        'total_assistance',
+        'total_quote',
+        'sent_to_patient_at',
     ];
-    
 
-    /**
-     * The attributes that should be cast.
-     *
-     * @var array<string, string>
-     */
     protected $casts = [
-        'amount' => 'decimal:2', // Cast amount to decimal with 2 places
+        'amount' => 'decimal:2',
+        'total_clinique' => 'decimal:2',
+        'total_assistance' => 'decimal:2',
+        'total_quote' => 'decimal:2',
     ];
 
-    /**
-     * Get the appointment that owns the quote.
-     */
     public function appointment(): BelongsTo
     {
-        // Assumes 'appointment_id' in this table references 'id' in the 'appointments' table
         return $this->belongsTo(Appointment::class);
-        // If the foreign key is different, specify it: return $this->belongsTo(Appointment::class, 'foreign_key');
+    }
+
+    public function assistanceQuotes(): HasMany
+    {
+        return $this->hasMany(AssistanceQuote::class);
     }
 }

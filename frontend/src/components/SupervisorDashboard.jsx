@@ -1,1458 +1,1907 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router-dom'; // Assuming react-router-dom v6+
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, Line } from 'recharts'; // Added Line
+import { useDebounce } from 'react-use'; // Assuming react-use is available
+import axios from 'axios';
+import html2canvas from 'html2canvas'; // Ensure this is installed: npm install html2canvas
+import jsPDF from 'jspdf'; // Ensure this is installed: npm install jspdf
+import './dashboard.css';
+// --- IMPORT THE CSS FILE ---
+// Make sure you have a corresponding CSS file (e.g., dashboard.css)
+// import './dashboard.css'; // Adjust path if css file is in a different directory
+// Add the necessary CSS styles from the Admin Dashboard example to your dashboard.css
+/*
+Add styles for:
+.status-badge.pending, .status-badge.confirmed, etc.
+.quote-link-icon
+.table-container.responsive
+.loading-container, .error-container
+.simple-spinner
+.dashboard-body, .dashboard-header, .menu-toggle, .header-title, .header-actions
+.main-content-wrapper, .sidebar, .sidebar.open, .sidebar-button, .sidebar-button.active
+.content-area, .content-overlay
+.alert-message, .alert-close-btn
+.content-section, .section-header
+.filter-controls, .form-group, .filter-controls.advanced
+.chart-container, .chart-loading-overlay
+.summary-cards, .summary-card
+.table-container, .styled-table, .actions-cell, .no-results-row, .comment-cell
+.pagination-controls, .pagination-info, .pagination-rows-select, .pagination-buttons
+.modal-overlay, .modal-content, .modal-title, .modal-message, .modal-actions, .modal-button, .confirm-button, .cancel-button, .button-spinner
+.form-dialog-content, .modal-body, .form-grid
+.toast-notification, .toast-icon, .toast-message
+.status-active, .status-inactive
+.button-small, .button-icon-only, .button-outline, .button-warning, .button-success
+.readonly-appointment-label
+.form-group-inline
+/* Add any other specific styles needed */
 
-// Removed axios import as apiClient is created below
-// import axios from '../axios'; // Assuming '../axios' is your configured Axios instance
-import { useNavigate } from 'react-router-dom';
-import { useContext } from 'react';
-import { AuthContext } from '../AuthContext.jsx';
 
-// Import Recharts components needed for the chart
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts'; // Renamed Recharts Tooltip
-import { useDebounce } from 'react-use'; // Or any debounce hook/utility
-
-// Material UI Components
-import {
-    AppBar, Toolbar, Typography, Container, Grid, Card, CardHeader, CardContent, Button, TextField,
-    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TablePagination, Paper, Box,
-    Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Select, MenuItem, InputLabel, FormControl,
-    CircularProgress, Alert, IconButton, Skeleton, Tooltip, Drawer, List, ListItem, ListItemText, ListItemIcon,Link
-} from '@mui/material';
-import DeleteIcon from '@mui/icons-material/Delete';
-import EditIcon from '@mui/icons-material/Edit';
-import AddIcon from '@mui/icons-material/Add';
-import LogoutIcon from '@mui/icons-material/Logout';
-import MenuIcon from '@mui/icons-material/Menu';
-import BarChartIcon from '@mui/icons-material/BarChart';
-import PeopleIcon from '@mui/icons-material/People';
-import EventIcon from '@mui/icons-material/Event';
-import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
-
-// Import both ToastContainer and toast from react-toastify
-import { ToastContainer, toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css'; // Import the CSS
 
 // --- Axios Client Setup ---
-// NOTE: This assumes you have an axios instance configured elsewhere or you install axios
-// If not, you might need to install axios: npm install axios or yarn add axios
-// and configure it here or import a configured instance.
-// For demonstration, creating a basic instance here.
-import axios from 'axios'; // Import axios directly if not configured elsewhere
-
 const apiClient = axios.create({
-    baseURL: import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api', // Use env variable
-    headers: {
-        'Accept': 'application/json',
-    }
+  baseURL: import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api', // Ensure this points to your API base
+  headers: {
+    'Accept': 'application/json',
+  }
 });
 
-// Add interceptor to include token in requests
+// Add Authorization token interceptor
 apiClient.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 }, error => {
-    return Promise.reject(error);
+  return Promise.reject(error);
 });
 
-// --- Main Dashboard Component ---
+// --- Helper Hook for Auth/Logout ---
+const useAuth = () => {
+  const navigate = useNavigate();
+  const logout = useCallback(() => {
+    console.log("Logging out (Supervisor)..."); // Dev log
+    localStorage.removeItem('token');
+    navigate('/login'); // Redirect to login page
+  }, [navigate]);
+  return { logout };
+};
+
+// --- Reusable Toast Notification Component ---
+const ToastNotification = ({ message, type }) => {
+  if (!message) return null;
+  const icon = type === 'success' ? '✓' : type === 'error' ? '✕' : type === 'info' ? 'ℹ' : '⚠';
+  return (
+    <div className={`toast-notification toast-${type}`}>
+      <span className="toast-icon">{icon}</span>
+      <span className="toast-message">{message}</span>
+    </div>
+  );
+};
+
+// --- Reusable Confirmation Modal Component ---
+const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message, confirmText = 'Confirmer', cancelText = 'Annuler', isLoading = false }) => {
+  if (!isOpen) return null;
+  return (
+    <div className={`modal-overlay ${!isOpen ? 'closing' : ''}`} onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        {title && <h3 className="modal-title">{title}</h3>}
+        <p className="modal-message">{message}</p>
+        <div className="modal-actions">
+          <button onClick={onClose} className="modal-button cancel-button" disabled={isLoading}>{cancelText}</button>
+          <button onClick={onConfirm} className="modal-button confirm-button" disabled={isLoading}>
+            {isLoading ? (<div className="button-spinner"></div>) : confirmText}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Reusable Form Dialog Component ---
+const FormDialog = ({ isOpen, onClose, title, children, actions }) => {
+  if (!isOpen) return null;
+  return (
+    <div className={`modal-overlay ${!isOpen ? 'closing' : ''}`} onClick={onClose}>
+      <div className="modal-content form-dialog-content" onClick={(e) => e.stopPropagation()}>
+        {title && <h3 className="modal-title">{title}</h3>}
+        <div className="modal-body">{children}</div>
+        <div className="modal-actions">{actions}</div>
+      </div>
+    </div>
+  );
+};
+
+// --- Main SupervisorDashboard Component ---
 function SupervisorDashboard() {
-    const navigate = useNavigate();
-    const [userRole, setUserRole] = useState(null);
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+  const toastTimerRef = useRef(null);
+  const isMountedRef = useRef(true);
+  const chartContainerRef = useRef(null); // Ref for chart container export
 
-    // Data States
-    const [users, setUsers] = useState([]);
-    const [appointments, setAppointments] = useState([]);
-    const [statistics, setStatistics] = useState(null);
-    const [quotes, setQuotes] = useState([]); // State for quotes (used in dropdown disabling)
+  // --- State Variables ---
+  const [userRole, setUserRole] = useState(null); // Should be 'superviseur'
+  const [users, setUsers] = useState([]);
+  const [appointments, setAppointments] = useState([]);
+  const [statistics, setStatistics] = useState(null);
+  const [quotes, setQuotes] = useState([]);
 
-    // Pagination States
-    const [userPage, setUserPage] = useState(0);
-    const [userRowsPerPage, setUserRowsPerPage] = useState(10);
-    const [userTotalRows, setUserTotalRows] = useState(0);
-    const userRowsPerPageOptions = useMemo(() => [5, 10, 25, 50], []);
+  // User Pagination & Filtering
+  const [userPage, setUserPage] = useState(0);
+  const [userRowsPerPage, setUserRowsPerPage] = useState(10);
+  const [userTotalRows, setUserTotalRows] = useState(0);
+  const userRowsPerPageOptions = useMemo(() => [5, 10, 25, 50], []);
+  const [userSearch, setUserSearch] = useState('');
+  const [debouncedUserSearch, setDebouncedUserSearch] = useState('');
+  const [selectedRoleFilter, setSelectedRoleFilter] = useState(''); // Supervisor might have limited roles to filter
 
-    const [appointmentPage, setAppointmentPage] = useState(0);
-    const [appointmentRowsPerPage, setAppointmentRowsPerPage] = useState(10);
-    const [appointmentTotalRows, setAppointmentTotalRows] = useState(0);
-    const appointmentRowsPerPageOptions = useMemo(() => [5, 10, 25], []);
+  // Appointment Data Fetching & Display Pagination/Filtering
+  const [appointmentFetchPage, setAppointmentFetchPage] = useState(0); // For initial fetch if needed
+  const [appointmentFetchRowsPerPage, setAppointmentFetchRowsPerPage] = useState(1000); // Fetch many for client-side filtering
+  const [appointmentViewPage, setAppointmentViewPage] = useState(0); // For the displayed table
+  const [appointmentViewRowsPerPage, setAppointmentViewRowsPerPage] = useState(10); // For the displayed table
+  const appointmentViewRowsPerPageOptions = useMemo(() => [5, 10, 25, 50, 100], []);
+  const [appointmentStatusFilter, setAppointmentStatusFilter] = useState(''); // Filter for display table
+  const [appointmentServiceFilter, setAppointmentServiceFilter] = useState(''); // Filter for display table
 
-    const [quotePage, setQuotePage] = useState(0);
-    const [quoteRowsPerPage, setQuoteRowsPerPage] = useState(10);
-    const [quoteTotalRows, setQuoteTotalRows] = useState(0);
-    const quoteRowsPerPageOptions = useMemo(() => [5, 10, 25], []);
+  // Quote Pagination & Filtering
+  const [quotePage, setQuotePage] = useState(0);
+  const [quoteRowsPerPage, setQuoteRowsPerPage] = useState(10);
+  const [quoteTotalRows, setQuoteTotalRows] = useState(0);
+  const quoteRowsPerPageOptions = useMemo(() => [5, 10, 25], []);
+  const [quoteSearch, setQuoteSearch] = useState('');
+  const [debouncedQuoteSearch, setDebouncedQuoteSearch] = useState('');
+  const [quoteStatusFilter, setQuoteStatusFilter] = useState(''); // Filter for display table
+  const [quoteServiceFilter, setQuoteServiceFilter] = useState(''); // Filter for display table
 
-    // Filter/Search States
-    const [userSearch, setUserSearch] = useState('');
-    const [debouncedUserSearch, setDebouncedUserSearch] = useState('');
-    const [selectedRoleFilter, setSelectedRoleFilter] = useState(''); // State for role filter
-    const [quoteSearch, setQuoteSearch] = useState('');
-    const [debouncedQuoteSearch, setDebouncedQuoteSearch] = useState(''); // Added debounce for quotes
-    const [statsMonth, setStatsMonth] = useState(String(new Date().getMonth() + 1)); // Default to current month
-    const [statsYear, setStatsYear] = useState(String(new Date().getFullYear())); // Default to current year
 
-    // UI / Form States
-    const [loading, setLoading] = useState({ users: false, appointments: false, stats: false, quotes: false, auth: true });
-    const [error, setError] = useState({ users: null, appointments: null, stats: null, quotes: null, general: null });
-    const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
-    const [currentUser, setCurrentUser] = useState(null);
-    const [newUser, setNewUser] = useState({ name: '', last_name: '', email: '', password: '', role: '' });
-    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-    const [userToDelete, setUserToDelete] = useState(null);
+  // Statistics Filters & State
+  const [statsMonth, setStatsMonth] = useState(String(new Date().getMonth() + 1));
+  const [statsYear, setStatsYear] = useState(String(new Date().getFullYear()));
+  const [granularity, setGranularity] = useState('daily'); // daily, weekly, monthly
+  const [comparePrevious, setComparePrevious] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [summaryStats, setSummaryStats] = useState({ totalRdv: 0, totalQuotes: 0, acceptedRate: 0 }); // Example summary stats
 
-    // State for Add Quote Dialog
-    const [isQuoteDialogOpen, setIsQuoteDialogOpen] = useState(false);
-    const [newQuote, setNewQuote] = useState({ appointment_id: '', file: null });
+  // Loading & Error State
+  const [loading, setLoading] = useState({ users: false, appointments: false, stats: false, quotes: false, auth: true });
+  const [error, setError] = useState({ users: null, appointments: null, stats: null, quotes: null, general: null, dialog: null });
 
-    // Sidebar State
-    const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Dialog/Modal State
+  const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null); // User being edited
+  const [newUser, setNewUser] = useState({ name: '', last_name: '', email: '', password: '', role: '', telephone: '', adresse: '' }); // New user form
+  const [isQuoteDialogOpen, setIsQuoteDialogOpen] = useState(false);
+  const [newQuote, setNewQuote] = useState({ appointment_id: '', total_clinique: '', assistance_items: [{ label: '', amount: '' }] }); // New/Edit quote form
+  const [currentQuoteId, setCurrentQuoteId] = useState(null); // Quote being edited
+  const [availableAppointments, setAvailableAppointments] = useState([]); // For quote dialog dropdown
+  const [isModalOpen, setIsModalOpen] = useState(false); // Confirmation modal
+  const [modalConfig, setModalConfig] = useState({ title: '', message: '', onConfirm: () => { } });
+  const [modalLoading, setModalLoading] = useState(false);
 
-    // Active Section State
-    const [activeSection, setActiveSection] = useState('statistics'); // Default to statistics
+  // UI State
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState('statistics'); // Default section
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState('success');
+  const [isToastVisible, setIsToastVisible] = useState(false);
 
-    // Available roles for dropdowns
-    const roles = useMemo(() => ['agent', 'confirmateur', 'patient', 'clinique'], []);
+  // Configuration (Roles supervisor can manage/see, adjust as needed)
+  const manageableRoles = useMemo(() => ['agent', 'confirmateur', 'patient', 'clinique'], []); // Roles supervisor can potentially create/filter
+  const chartColors = ['#c29b6e', '#88a0a8', '#e8d8c3', '#5c4b3a', '#a0aec0', '#f6e05e', '#b794f4'];
 
-    // --- Data Fetching Functions (Declared BEFORE useDebounce) ---
+  // --- Helper Functions (Toast & Modal) ---
+  const showToast = useCallback((message, type = 'success', duration = 3500) => {
+    if (!isMountedRef.current) return;
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToastMessage(message);
+    setToastType(type);
+    setIsToastVisible(true);
+    toastTimerRef.current = setTimeout(() => {
+      setIsToastVisible(false);
+      setTimeout(() => setToastMessage(''), 500); // Clear message after fade out
+    }, duration);
+  }, []);
 
-    // **UPDATED fetchUsers to include role filter parameter**
-    const fetchUsers = useCallback(async (page = 0, limit = 10, search = '', role = '') => {
-        setLoading(prev => ({ ...prev, users: true }));
-        setError(prev => ({ ...prev, users: null }));
-        try {
-            const apiPage = page + 1; // API pagination is usually 1-based
-            // Construct the query parameters, adding role only if it's selected
-            const queryParams = new URLSearchParams({
-                page: apiPage,
-                limit: limit,
-                search: search,
-            });
-            if (role) {
-                queryParams.append('role', role); // Add role filter if provided
-            }
-
-            const response = await apiClient.get(`/superviseur/users?${queryParams.toString()}`);
-            const responseData = response.data?.data || [];
-            const total = response.data?.total || 0;
-            const currentPage = response.data?.current_page ? response.data.current_page - 1 : 0;
-            let perPage = response.data?.per_page ? Number(response.data.per_page) : limit;
-
-            // Ensure perPage from API is one of the allowed options
-            if (!userRowsPerPageOptions.includes(perPage)) {
-                console.warn(`API returned per_page=${perPage} not in options for users. Defaulting to ${limit} or ${userRowsPerPageOptions[1]}`);
-                perPage = userRowsPerPageOptions.includes(limit) ? limit : userRowsPerPageOptions[1]; // Default to 10 if limit isn't valid either
-            }
-
-            setUsers(responseData);
-            setUserTotalRows(total);
-            setUserPage(currentPage);
-            setUserRowsPerPage(perPage); // Set rows per page based on API or default
-        } catch (err) {
-            console.error("Failed to fetch users:", err);
-            setError(prev => ({ ...prev, users: 'Failed to fetch users.' }));
-            toast.error('Failed to load users. Please try refreshing.');
-            setUsers([]);
-            setUserTotalRows(0);
-        } finally {
-            setLoading(prev => ({ ...prev, users: false }));
-        }
-    }, [userRowsPerPageOptions]); // Dependency array for useCallback
-
-    const fetchAppointments = useCallback(async (page = 0, limit = 10) => {
-        setLoading(prev => ({ ...prev, appointments: true }));
-        setError(prev => ({ ...prev, appointments: null }));
-        try {
-            const apiPage = page + 1;
-            // Fetch *all* appointments for the dropdown, not just paginated ones
-            const response = await apiClient.get(`/superviseur/appointments?limit=1000`); // Fetch a large number for the dropdown
-            const responseData = response.data?.data || [];
-            const total = response.data?.total || 0; // Still get total for pagination display if needed
-            const currentPage = response.data?.current_page ? response.data.current_page - 1 : 0;
-            let perPage = response.data?.per_page ? Number(response.data.per_page) : limit;
-
-            if (!appointmentRowsPerPageOptions.includes(perPage)) {
-                // console.warn(`API returned per_page=${perPage} not in options for appointments. Defaulting to ${limit} or ${appointmentRowsPerPageOptions[0]}`);
-                perPage = appointmentRowsPerPageOptions.includes(limit) ? limit : appointmentRowsPerPageOptions[0]; // Default to 5
-            }
-
-            setAppointments(responseData); // This state will now hold all appointments for the dropdown
-            setAppointmentTotalRows(total); // Keep total for pagination if displaying a table elsewhere
-            setAppointmentPage(currentPage); // Keep page for pagination if displaying a table elsewhere
-            setAppointmentRowsPerPage(perPage); // Keep rows per page for pagination if displaying a table elsewhere
-        } catch (err) {
-            console.error("Failed to fetch appointments:", err);
-            setError(prev => ({ ...prev, appointments: 'Failed to fetch appointments.' }));
-            toast.error('Failed to load appointments.');
-            setAppointments([]);
-            setAppointmentTotalRows(0);
-        } finally {
-            setLoading(prev => ({ ...prev, appointments: false }));
-        }
-    }, [appointmentRowsPerPageOptions]); // Dependency array for useCallback
-
-    const fetchQuotes = useCallback(async (page = 0, limit = 10, search = '') => {
-        setLoading(prev => ({ ...prev, quotes: true }));
-        setError(prev => ({ ...prev, quotes: null }));
-        try {
-            const apiPage = page + 1;
-            // Ensure the API returns 'comment' and 'filename'/'file_path' fields for each quote
-            const response = await apiClient.get(`/superviseur/quotes?page=${apiPage}&limit=${limit}&search=${search}`);
-            const responseData = response.data?.data || [];
-            const total = response.data?.total || 0;
-            const currentPage = response.data?.current_page ? response.data.current_page - 1 : 0;
-            let perPage = response.data?.per_page ? Number(response.data.per_page) : limit;
-
-            if (!quoteRowsPerPageOptions.includes(perPage)) {
-                console.warn(`API returned per_page=${perPage} not in options for quotes. Defaulting to ${limit} or ${quoteRowsPerPageOptions[0]}`);
-                perPage = quoteRowsPerPageOptions.includes(limit) ? limit : quoteRowsPerPageOptions[0]; // Default to 5
-            }
-
-            setQuotes(responseData); // responseData should now contain quote objects including comment and filename/file_path
-            setQuoteTotalRows(total);
-            setQuotePage(currentPage);
-            setQuoteRowsPerPage(perPage);
-        } catch (err) {
-            console.error("Failed to fetch quotes:", err);
-            setError(prev => ({ ...prev, quotes: 'Failed to fetch quotes.' }));
-            toast.error('Failed to load quotes.');
-            setQuotes([]);
-            setQuoteTotalRows(0);
-        } finally {
-            setLoading(prev => ({ ...prev, quotes: false }));
-        }
-    }, [quoteRowsPerPageOptions]); // Dependency array for useCallback
-
-    // Fetch Statistics
-    const fetchStatistics = useCallback(async (month, year) => {
-        setLoading(prev => ({ ...prev, stats: true }));
-        setError(prev => ({ ...prev, stats: null }));
-        try {
-            const response = await apiClient.get(`/superviseur/statistics?month=${month}&year=${year}`);
-            // Basic validation of the expected structure
-            if (response.data && Array.isArray(response.data.labels) && Array.isArray(response.data.datasets)) {
-                setStatistics(response.data);
-            } else {
-                console.warn("Statistics API response format is unexpected. Expected { labels: [], datasets: [] }", response.data);
-                setError(prev => ({ ...prev, stats: 'Statistics data format is incorrect.' }));
-                setStatistics(null); // Clear potentially bad data
-                toast.warn("Received unexpected statistics format from server.");
-            }
-        } catch (err) {
-            console.error("Failed to fetch statistics:", err);
-            const status = err.response?.status;
-            if (status === 500) {
-                setError(prev => ({ ...prev, stats: 'Failed to fetch statistics (Server Error). Please check backend logs.' }));
-                toast.error("Statistics server error. Check backend.");
-            } else if (status === 404) {
-                setError(prev => ({ ...prev, stats: 'Statistics endpoint not found.' }));
-                toast.error("Statistics endpoint not found (404).");
-            } else {
-                setError(prev => ({ ...prev, stats: `Failed to fetch statistics (${status || 'Network Error'}).` }));
-                toast.error("Could not load statistics.");
-            }
-            setStatistics(null); // Clear stats on error
-        } finally {
-            setLoading(prev => ({ ...prev, stats: false }));
-        }
-    }, []); // Dependencies: none
-
-    // --- Debounce Hooks (Now placed AFTER fetchUsers/fetchQuotes) ---
-
-    // Debounce user search input - **UPDATED to include role filter**
-    useDebounce(() => {
-        setDebouncedUserSearch(userSearch); // Update debounced value first
-        // Fetch with the latest search term AND role filter, reset page to 0
-        fetchUsers(0, userRowsPerPage, userSearch, selectedRoleFilter);
-    }, 500, [userSearch, userRowsPerPage, selectedRoleFilter, fetchUsers]); // Add selectedRoleFilter dependency
-
-    // Debounce quote search input
-    useDebounce(() => {
-        setDebouncedQuoteSearch(quoteSearch); // Update debounced value first
-        fetchQuotes(0, quoteRowsPerPage, quoteSearch); // Fetch with the latest search term
-    }, 500, [quoteSearch, quoteRowsPerPage, fetchQuotes]);
-
-    // --- Authorization and Initial Data Fetch ---
-
-    useEffect(() => {
-        const checkAuthAndFetch = async () => {
-            setLoading(prev => ({ ...prev, auth: true }));
-            setError(prev => ({ ...prev, general: null }));
-            const token = localStorage.getItem('token');
-            if (!token) {
-                navigate('/login');
-                return;
-            }
-            try {
-                const response = await apiClient.get('/user'); // Endpoint to get current user info
-                const isSupervisor = response.data?.roles?.some(role => role.name === 'superviseur');
-
-                if (isSupervisor) {
-                    setUserRole('superviseur');
-                    // Initial fetch for all data sections using debounced values or initial state
-                    // **Pass initial role filter state here**
-                    fetchUsers(userPage, userRowsPerPage, debouncedUserSearch, selectedRoleFilter);
-                    fetchAppointments(appointmentPage, appointmentRowsPerPage); // Fetch appointments for dropdown
-                    fetchQuotes(quotePage, quoteRowsPerPage, debouncedQuoteSearch); // Fetch quotes for table and dropdown logic
-                    fetchStatistics(statsMonth, statsYear);
-                } else {
-                    setError(prev => ({ ...prev, general: 'Access Denied: Admin role required.' }));
-                    handleLogout(); // Logout if not admin
-                }
-            } catch (err) {
-                console.error("Auth check failed:", err);
-                if (err.response?.status === 401) {
-                    setError(prev => ({ ...prev, general: 'Session expired. Please login again.' }));
-                    toast.error('Session expired. Please login again.');
-                } else {
-                    setError(prev => ({ ...prev, general: 'Authentication failed. Please login again.' }));
-                    toast.error('Authentication failed.');
-                }
-                handleLogout(); // Logout on auth error
-            } finally {
-                setLoading(prev => ({ ...prev, auth: false }));
-            }
-        };
-        checkAuthAndFetch();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [navigate]); // Only run on mount/navigate change
-
-    // Effect to refetch statistics when month/year changes AND user is admin
-    useEffect(() => {
-        // Only fetch if the role is confirmed and month/year are set
-        if (userRole === 'administrateur' && statsMonth && statsYear) {
-            fetchStatistics(statsMonth, statsYear);
-        }
-    }, [statsMonth, statsYear, userRole, fetchStatistics]); // Dependencies are correct
-
-    // **NEW Effect to refetch users when role filter changes**
-    useEffect(() => {
-        // Only refetch if the user role is admin (initial fetch handles other cases)
-        // And avoid refetching during the initial debounce setup for search
-        if (userRole === 'administrateur' && !loading.auth) {
-            // Fetch users with the new role filter, reset page to 0
-            fetchUsers(0, userRowsPerPage, debouncedUserSearch, selectedRoleFilter);
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedRoleFilter, userRole]); // Trigger only when role filter or userRole changes
-
-    // --- CRUD Handlers ---
-
-    const handleSaveUser = async () => {
-        const isEditing = !!currentUser;
-        // Ensure password is only included if it's set (for edit) or required (for create)
-        const userData = isEditing
-            ? { ...currentUser, password: currentUser.password || undefined } // Send undefined if empty, API should ignore
-            : newUser;
-
-        // Basic validation
-        if (!userData.name || !userData.last_name || !userData.email || !userData.role) {
-            setError(prev => ({ ...prev, general: "Please fill in all required fields." }));
-            toast.warn("Please fill in all required fields.");
-            return;
-        }
-        // Password length validation only for new users or if password is changed for existing user
-        if (userData.password && userData.password.length < 8) {
-            setError(prev => ({ ...prev, general: "Password must be at least 8 characters long." }));
-            toast.warn("Password must be at least 8 characters long.");
-            return;
-        }
-
-        setError(prev => ({ ...prev, general: null })); // Clear previous errors
-        const url = isEditing ? `/superviseur/users/${currentUser.id}` : '/superviseur/users';
-        const method = isEditing ? 'put' : 'post';
-
-        try {
-            const response = await apiClient[method](url, userData, {
-                headers: { 'Content-Type': 'application/json' }
-            });
-            closeUserDialog();
-            // Refetch users based on current pagination, search, and role filter state
-            fetchUsers(userPage, userRowsPerPage, debouncedUserSearch, selectedRoleFilter);
-            toast.success(`User "${response.data.name}" ${isEditing ? 'updated' : 'created'} successfully.`);
-        } catch (err) {
-            console.error(`Failed to ${isEditing ? 'update' : 'create'} user:`, err.response?.data);
-            const errors = err.response?.data?.errors;
-            let errorMsg = `Failed to ${isEditing ? 'update' : 'create'} user.`;
-            if (errors) {
-                // Concatenate validation errors
-                errorMsg += " " + Object.values(errors).flat().join(' ');
-            } else {
-                errorMsg += " " + (err.response?.data?.message || 'Please check details and try again.');
-            }
-            setError(prev => ({ ...prev, general: errorMsg })); // Show error in dialog
-            toast.error(errorMsg);
-        }
+  useEffect(() => {
+    // Cleanup timer on unmount
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
+  }, []);
 
-    const confirmDeleteUser = async () => {
-        if (!userToDelete) return;
-        try {
-            await apiClient.delete(`/superviseur/users/${userToDelete.id}`);
-            closeDeleteDialog();
-            // Adjust page if the last item on the current page was deleted
-            const newTotal = userTotalRows - 1;
-            const newTotalPages = Math.ceil(newTotal / userRowsPerPage);
-            const newPage = (userPage >= newTotalPages && newTotalPages > 0) ? newTotalPages - 1 : userPage;
+  const openConfirmationModal = useCallback(({ title, message, onConfirm, confirmText = 'Confirmer' }) => {
+    if (!isMountedRef.current) return;
+    setError(prev => ({ ...prev, dialog: null })); // Clear dialog error when opening modal
+    setModalConfig({ title, message, onConfirm, confirmText });
+    setIsModalOpen(true);
+  }, []);
 
-            // Fetch users for the potentially adjusted page, keeping filters
-            fetchUsers(newPage, userRowsPerPage, debouncedUserSearch, selectedRoleFilter);
-            toast.success(`User "${userToDelete.name}" deleted successfully.`);
-        } catch (err) {
-            console.error("Failed to delete user:", err);
-            const errorMsg = `Failed to delete user "${userToDelete.name}". ` + (err.response?.data?.message || '');
-            // Show error in the delete dialog or as a general alert if dialog closes immediately
-            setError(prev => ({ ...prev, general: errorMsg }));
-            toast.error(errorMsg);
-        } finally {
-            setUserToDelete(null); // Clear user to delete state
-        }
-    };
+  const closeConfirmationModal = useCallback(() => {
+    setIsModalOpen(false);
+    setModalLoading(false);
+    // Reset modal config after animation
+    setTimeout(() => setModalConfig({ title: '', message: '', onConfirm: () => { } }), 300);
+  }, []);
 
-    const toggleUserStatus = async (userId) => {
-        try {
-            const response = await apiClient.post(`/superviseur/users/${userId}/toggle-status`);
-            const isActive = response.data?.is_active; // Assuming API returns the new status
-            toast.success(`User account ${isActive ? 'activated' : 'deactivated'}.`);
-            // Refetch users to reflect the status change, keeping filters
-            fetchUsers(userPage, userRowsPerPage, debouncedUserSearch, selectedRoleFilter);
-        } catch (err) {
-            console.error("Failed to toggle user status:", err);
-            toast.error("Failed to update user status. " + (err.response?.data?.message || ''));
-        }
-    };
+  const handleModalConfirm = useCallback(async () => {
+    if (typeof modalConfig.onConfirm === 'function') {
+      setModalLoading(true);
+      setError(prev => ({ ...prev, dialog: null })); // Clear dialog error
+      try {
+        await modalConfig.onConfirm();
+        // Success: onConfirm should handle closing the modal or showing success toast
+      } catch (error) {
+        console.error("Modal confirmation action failed:", error); // Dev log
+        const errorMessage = error.message || 'Une erreur inattendue s\'est produite lors de la confirmation.';
+        setError(prev => ({ ...prev, dialog: errorMessage })); // Show error in potential underlying dialog
+        showToast(errorMessage, 'error');
+        setModalLoading(false); // Stop loading indicator on error
+        // Optionally close modal on error or let user retry/cancel
+        // closeConfirmationModal();
+      }
+      // Note: Modal doesn't close automatically here. The onConfirm function should call closeConfirmationModal on success.
+    } else {
+      closeConfirmationModal(); // Close if no confirm action defined
+    }
+  }, [modalConfig, closeConfirmationModal, showToast]);
 
-    // Function to view/download patient files (assuming PDF for now)
-    const viewPatientFiles = async (userId) => {
-        try {
-            // 1. Get list of files for the patient
-            const responseFiles = await apiClient.get(`/superviseur/users/${userId}/patient-files`);
-            const files = responseFiles.data; // Assuming API returns an array of file objects { id: ..., file_name: ... }
+  // --- Data Fetching Functions ---
+  const fetchUsers = useCallback(async (page = 0, limit = 10, search = '', role = '') => {
+    if (!isMountedRef.current) return;
+    setLoading(prev => ({ ...prev, users: true }));
+    setError(prev => ({ ...prev, users: null }));
+    try {
+      const apiPage = page + 1; // API pagination might be 1-based
+      const queryParams = new URLSearchParams({ page: apiPage, limit: limit, search: search });
+      if (role) queryParams.append('role', role);
+      // *** USE SUPERVISOR ENDPOINT ***
+      const response = await apiClient.get(`/superviseur/users?${queryParams.toString()}`);
+      if (!isMountedRef.current) return;
 
-            if (!files || files.length === 0) {
-                toast.info('This patient has not uploaded any files.');
-                return;
-            }
+      const responseData = response.data?.data || [];
+      const total = response.data?.total || 0;
+      const currentPage = response.data?.current_page ? response.data.current_page - 1 : 0; // Adjust to 0-based
+      let perPage = response.data?.per_page ? Number(response.data.per_page) : limit;
 
-            // For simplicity, download the first file found. Could be extended to show a list.
-            const firstFile = files[0];
-            const fileId = firstFile.id;
-            const fileName = firstFile.file_name || `medical_file_${fileId}.pdf`; // Fallback filename
+      // Ensure perPage is a valid option
+      if (!userRowsPerPageOptions.includes(perPage)) {
+        perPage = userRowsPerPageOptions.includes(limit) ? limit : userRowsPerPageOptions[1]; // Default to 10 if invalid
+      }
 
-            // 2. Download the specific file
-            const token = localStorage.getItem('token');
-            const responseBlob = await fetch(`${apiClient.defaults.baseURL}/superviseur/files/${fileId}/download`, {
-                method: 'GET',
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    Accept: 'application/pdf', // Request PDF content type
-                }
-            });
+      setUsers(responseData);
+      setUserTotalRows(total);
+      setUserPage(currentPage);
+      setUserRowsPerPage(perPage);
 
-            if (!responseBlob.ok) {
-                // Handle download errors (e.g., file not found, permission denied)
-                const errorData = await responseBlob.text(); // Try to get error message
-                console.error("Download failed:", responseBlob.status, errorData);
-                throw new Error(`Download failed with status ${responseBlob.status}.`);
-            }
+    } catch (err) {
+      console.error("Failed to fetch users (Supervisor):", err); // Dev log
+      if (!isMountedRef.current) return;
+      setError(prev => ({ ...prev, users: 'Échec de la récupération des utilisateurs.' }));
+      showToast('Échec du chargement des utilisateurs. Veuillez essayer de rafraîchir.', 'error');
+      setUsers([]); setUserTotalRows(0); // Reset state on error
+    } finally {
+      if (isMountedRef.current) setLoading(prev => ({ ...prev, users: false }));
+    }
+  }, [userRowsPerPageOptions, showToast]); // Dependencies for the fetch function
 
-            // 3. Create a blob URL and trigger download
-            const blob = await responseBlob.blob();
-            const downloadUrl = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = downloadUrl;
-            a.download = fileName; // Use the filename from the API or the fallback
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(downloadUrl); // Clean up the blob URL
+  const fetchAppointments = useCallback(async (page = 0, limit = 1000) => { // Fetch a large number for client-side filtering
+    if (!isMountedRef.current) return;
+    setLoading(prev => ({ ...prev, appointments: true }));
+    setError(prev => ({ ...prev, appointments: null }));
+    try {
+      const apiPage = page + 1;
+      // *** USE SUPERVISOR ENDPOINT ***
+      const response = await apiClient.get(`/superviseur/appointments?page=${apiPage}&limit=${limit}`);
+      if (!isMountedRef.current) return;
+      setAppointments(response.data?.data || []);
+      setAppointmentViewPage(0); // Reset display page when data refreshes
+    } catch (err) {
+      console.error("Failed to fetch appointments (Supervisor):", err); // Dev log
+      if (!isMountedRef.current) return;
+      setError(prev => ({ ...prev, appointments: 'Échec de la récupération des rendez-vous.' }));
+      showToast('Échec du chargement des rendez-vous.', 'error');
+      setAppointments([]); // Reset state on error
+    } finally {
+      if (isMountedRef.current) setLoading(prev => ({ ...prev, appointments: false }));
+    }
+  }, [showToast]); // Dependencies
 
-        } catch (err) {
-            console.error("Failed to fetch or download patient files:", err);
-            toast.error("Failed to download patient file. " + (err.message || ''));
-        }
-    };
+  const fetchQuotes = useCallback(async (page = 0, limit = 10, search = '') => {
+    if (!isMountedRef.current) return;
+    setLoading(prev => ({ ...prev, quotes: true }));
+    setError(prev => ({ ...prev, quotes: null }));
+    try {
+      const apiPage = page + 1;
+      // *** USE SUPERVISOR ENDPOINT ***
+      const quotesRes = await apiClient.get(`/superviseur/quotes?page=${apiPage}&limit=${limit}&search=${search}`);
+      if (!isMountedRef.current) return;
 
-    // --- Quote File Upload Handler (Used for updating existing quotes) ---
-    const handleUploadQuoteFile = async (quoteId, file) => {
-        if (!file) {
-            toast.info("No file selected.");
-            return;
-        }
-        if (file.type !== "application/pdf") {
-            toast.warn("Please select a PDF file.");
-            return;
-        }
-        // Frontend file size check (matches backend limit)
-        const maxSize = 20 * 1024 * 1024; // 20MB in bytes
-        if (file.size > maxSize) {
-            toast.error(`File size exceeds the limit of 20MB.`);
-            return; // Stop the upload attempt
-        }
+      // Handle potential variations in API response structure
+      const responseData = quotesRes.data;
+      const quotesData = Array.isArray(responseData.data) ? responseData.data : (responseData.data?.data || []); // Adapt based on actual response
+      const total = responseData.total || responseData.data?.total || 0;
+      const currentPage = responseData.current_page ? responseData.current_page - 1 : (responseData.data?.current_page ? responseData.data.current_page - 1 : 0);
+      let perPage = responseData.per_page ? Number(responseData.per_page) : (responseData.data?.per_page ? Number(responseData.data.per_page) : limit);
 
-        const formData = new FormData();
-        formData.append('file', file);
+      if (!quoteRowsPerPageOptions.includes(perPage)) {
+        perPage = quoteRowsPerPageOptions.includes(limit) ? limit : quoteRowsPerPageOptions[1]; // Default to 10
+      }
 
-        // Show loading feedback (optional)
-        const toastId = toast.loading("Uploading PDF...");
+      setQuotes(quotesData);
+      setQuoteTotalRows(total);
+      setQuotePage(currentPage);
+      setQuoteRowsPerPage(perPage);
 
-        try {
-            // Use the correct endpoint for uploading a quote file
-            await apiClient.post(`/superviseur/quotes/${quoteId}/upload`, formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
-            });
-            toast.update(toastId, { render: "PDF uploaded successfully!", type: "success", isLoading: false, autoClose: 3000 });
-            // Refetch quotes to show the updated file status/link
-            fetchQuotes(quotePage, quoteRowsPerPage, debouncedQuoteSearch);
-        } catch (err) {
-            console.error('Upload failed:', err.response?.data || err.message);
-            let errorMsg = 'Failed to upload PDF.';
-            if (err.response?.data?.message) {
-                errorMsg += ` ${err.response.data.message}`;
-            } else if (err.response?.status === 413) { // Payload Too Large
-                errorMsg = 'File is too large (Max: 20MB).';
-            } else if (err.response?.status === 422) { // Validation Errors
-                errorMsg = 'Upload validation failed.';
-                if (err.response.data.errors?.file) {
-                    errorMsg += ` ${err.response.data.errors.file.join(' ')}`;
-                }
-            } else {
-                errorMsg += ' Please try again.';
-            }
-            toast.update(toastId, { render: errorMsg, type: "error", isLoading: false, autoClose: 5000 });
-        }
-    };
+    } catch (err) {
+      console.error("Failed to fetch quotes (Supervisor):", err); // Dev log
+      if (!isMountedRef.current) return;
+      setError(prev => ({ ...prev, quotes: 'Échec de la récupération des devis.' }));
+      showToast('Échec du chargement des devis.', 'error');
+      setQuotes([]); setQuoteTotalRows(0); setQuotePage(0); // Reset state on error
+    } finally {
+      if (isMountedRef.current) setLoading(prev => ({ ...prev, quotes: false }));
+    }
+  }, [quoteRowsPerPageOptions, showToast]); // Dependencies
 
-    // Handle Creating a New Quote
-    const handleCreateQuote = async () => {
-        const { appointment_id, file } = newQuote; // Get data from state
-
-        // Basic validation
-        if (!appointment_id || !file) {
-            toast.warn("Please select an appointment and a PDF file.");
-            return;
-        }
-        // Check file type and size again before sending
-        if (file.type !== "application/pdf") {
-            toast.warn("Please select a PDF file.");
-            return;
-        }
-        const maxSize = 20 * 1024 * 1024; // 20MB
-        if (file.size > maxSize) {
-            toast.error(`File size exceeds the limit of 20MB.`);
-            return;
-        }
-
-        // Create FormData to send file and appointment ID
-        const formData = new FormData();
-        formData.append("appointment_id", appointment_id);
-        formData.append("file", file);
-
-        const toastId = toast.loading("Creating quote..."); // Loading indicator
-
-        try {
-            // Make POST request to the create quote endpoint
-            await apiClient.post("/superviseur/quotes", formData, {
-                headers: {
-                    // Axios usually sets multipart/form-data automatically when FormData is used
-                    // 'Content-Type': 'multipart/form-data', // Explicitly setting might be needed in some cases
-                },
-            });
-            toast.update(toastId, { render: "Quote added successfully!", type: "success", isLoading: false, autoClose: 3000 });
-            setIsQuoteDialogOpen(false); // Close the dialog
-            setNewQuote({ appointment_id: '', file: null }); // Reset the form state
-            // Refetch quotes to update the table, using current pagination/search settings
-            fetchQuotes(quotePage, quoteRowsPerPage, debouncedQuoteSearch);
-            // Also refetch appointments in case the newly quoted one needs to be disabled in the dropdown
-            fetchAppointments(appointmentPage, appointmentRowsPerPage);
-        } catch (err) {
-            console.error("Failed to create quote:", err.response?.data || err.message);
-            let errorMsg = "Failed to create quote."; // Default error message
-
-            // Check for specific backend error messages first
-            if (err.response?.data?.message) {
-                errorMsg = err.response.data.message; // Use backend message directly if available
-            }
-            // Handle specific status codes if no detailed message is present
-            else if (err.response?.status === 413) {
-                errorMsg = 'File is too large (Max: 20MB).';
-            }
-            // Handle validation errors (422)
-            else if (err.response?.status === 422) {
-                errorMsg = 'Validation failed.'; // General validation message
-                // Append specific field errors if available
-                if (err.response.data.errors?.file) {
-                    errorMsg += ` File: ${err.response.data.errors.file.join(' ')}`;
-                }
-                if (err.response.data.errors?.appointment_id) {
-                    errorMsg += ` Appointment: ${err.response.data.errors.appointment_id.join(' ')}`;
-                }
-                // Check for "already exists" specifically within 422 errors (if not caught by message check above)
-                if (err.response.data?.message?.includes("already exists")) {
-                    errorMsg = err.response.data.message; // Override with the specific duplicate message
-                } else if (err.response.data?.errors?.appointment_id?.some(msg => msg.includes("already exists"))) {
-                    // Alternative check if the error is nested under appointment_id
-                    errorMsg = err.response.data.errors.appointment_id.find(msg => msg.includes("already exists")) || "A quote for this appointment already exists.";
-                }
-            }
-
-            // Update the toast notification with the determined error message
-            toast.update(toastId, { render: errorMsg, type: "error", isLoading: false, autoClose: 5000 });
-
-            // Optionally keep the dialog open on error:
-            // setIsQuoteDialogOpen(true);
-        }
-    };
-
-
-    const { logout } = useContext(AuthContext); // 👈 from AuthContext
-
-    const handleLogout = () => {
-        logout(); // this handles everything (removing token, context, redirect, etc.)
-    };
-
-    // --- Dialog Management ---
-
-    const openUserDialog = (user = null) => {
-        setError(prev => ({ ...prev, general: null })); // Clear general errors when opening dialog
-        if (user) {
-            // Extract role name correctly, handle cases where roles array might be empty or missing
-            const roleName = user.roles?.length > 0 ? user.roles[0].name : (user.role || ''); // Fallback to user.role if roles array is missing/empty
-            setCurrentUser({ ...user, password: '', role: roleName }); // Set password to empty for edit form
-            setNewUser({ name: '', last_name: '', email: '', password: '', role: '' }); // Clear newUser state
-        } else {
-            setNewUser({ name: '', last_name: '', email: '', password: '', role: '' }); // Reset newUser form
-            setCurrentUser(null); // Clear currentUser state
-        }
-        setIsUserDialogOpen(true);
-    };
-
-    const closeUserDialog = () => {
-        setIsUserDialogOpen(false);
-        setCurrentUser(null);
-        setNewUser({ name: '', last_name: '', email: '', password: '', role: '' });
-        setError(prev => ({ ...prev, general: null })); // Clear general errors on close
-    };
-
-    const openDeleteDialog = (user) => {
-        // Store minimal info needed for deletion confirmation message
-        setUserToDelete({ id: user.id, name: `${user.name} ${user.last_name}` });
-        setIsDeleteDialogOpen(true);
-    };
-
-    const closeDeleteDialog = () => {
-        setIsDeleteDialogOpen(false);
-        setUserToDelete(null);
-        setError(prev => ({ ...prev, general: null })); // Clear general errors on close
-    };
-
-    // --- MUI TablePagination Handlers ---
-
-    const handleChangeUserPage = (event, newPage) => {
-        // setUserPage(newPage); // Let fetchUsers update the page state
-        fetchUsers(newPage, userRowsPerPage, debouncedUserSearch, selectedRoleFilter);
-    };
-
-    const handleChangeUserRowsPerPage = (event) => {
-        const newLimit = parseInt(event.target.value, 10);
-        // setUserRowsPerPage(newLimit); // Let fetchUsers update the rowsPerPage state
-        // setUserPage(0); // Reset to first page when changing rows per page
-        fetchUsers(0, newLimit, debouncedUserSearch, selectedRoleFilter); // Fetch page 0 with new limit and current filters
-    };
-
-    const handleChangeAppointmentPage = (event, newPage) => {
-        // setAppointmentPage(newPage);
-        // This pagination might not be needed if appointments are only for the dropdown
-        // fetchAppointments(newPage, appointmentRowsPerPage);
-        console.log("Appointment page changed (if table exists):", newPage);
-    };
-
-    const handleChangeAppointmentRowsPerPage = (event) => {
-        const newLimit = parseInt(event.target.value, 10);
-        // setAppointmentRowsPerPage(newLimit);
-        // setAppointmentPage(0);
-        // This pagination might not be needed if appointments are only for the dropdown
-        // fetchAppointments(0, newLimit);
-        console.log("Appointment rows per page changed (if table exists):", newLimit);
-    };
-
-    const handleChangeQuotePage = (event, newPage) => {
-        // setQuotePage(newPage);
-        fetchQuotes(newPage, quoteRowsPerPage, debouncedQuoteSearch);
-    };
-
-    const handleChangeQuoteRowsPerPage = (event) => {
-        const newLimit = parseInt(event.target.value, 10);
-        // setQuoteRowsPerPage(newLimit);
-        // setQuotePage(0);
-        fetchQuotes(0, newLimit, debouncedQuoteSearch);
-    };
-
-    // --- Memoized Chart Data ---
-
-    const chartData = useMemo(() => {
-        // Ensure statistics and its properties are valid before processing
-        if (!statistics || !Array.isArray(statistics.labels) || !Array.isArray(statistics.datasets)) {
-            return [];
-        }
-        // Filter out potentially invalid datasets (e.g., missing label or data array)
-        const validDatasets = statistics.datasets.filter(ds => ds && ds.label && Array.isArray(ds.data));
-
-        // Handle case where there are labels but no valid datasets (e.g., API returned empty datasets)
-        if (validDatasets.length === 0 && statistics.labels.length > 0) {
-            // Return labels only, so XAxis shows days, but no bars appear
-            return statistics.labels.map(dayLabel => ({ day: dayLabel }));
-        }
-
-        // Map labels to data points, including data from each valid dataset
-        return statistics.labels.map((dayLabel, index) => {
-            const dataPoint = { day: dayLabel }; // X-axis key
-            validDatasets.forEach(dataset => {
-                // Assign data for each dataset label, default to 0 if data is missing for this index
-                dataPoint[dataset.label] = dataset.data[index] ?? 0;
-            });
-            return dataPoint;
+  // Updated fetchStatistics Function for Supervisor
+  const fetchStatistics = useCallback(async (month, year) => {
+    if (!isMountedRef.current) return;
+    setLoading(prev => ({ ...prev, stats: true }));
+    setError(prev => ({ ...prev, stats: null }));
+    try {
+      // *** USE SUPERVISOR ENDPOINT ***
+      const response = await apiClient.get(`/superviseur/statistics`, {
+        params: {
+          month,
+          year,
+          granularity, // Pass granularity
+          compare_previous: comparePrevious ? 1 : 0, // Pass comparison flag
+        },
+      });
+      if (!isMountedRef.current) return;
+      const data = response.data;
+      // Validate response structure (adjust based on actual API)
+      if (data && Array.isArray(data.labels) && Array.isArray(data.datasets)) {
+        setStatistics(data);
+        // Update summary stats if provided by the backend
+        setSummaryStats({
+          totalRdv: data.total_appointments || 0,
+          totalQuotes: data.total_quotes || 0, // Assuming backend provides this
+          acceptedRate: data.accepted_percentage || 0, // Assuming backend provides this
         });
-    }, [statistics]); // Dependency: only recompute when statistics data changes
+      } else {
+        console.warn("Statistics API response format unexpected (Supervisor).", data); // Dev log
+        setError(prev => ({ ...prev, stats: 'Format des données statistiques incorrect.' }));
+        setStatistics(null); // Clear previous stats
+        setSummaryStats({ totalRdv: 0, totalQuotes: 0, acceptedRate: 0 }); // Reset summary
+        showToast("Format des statistiques reçu inattendu.", 'error');
+      }
+    } catch (err) {
+      console.error("Failed to fetch statistics (Supervisor):", err); // Dev log
+      if (!isMountedRef.current) return;
+      const statusText = err.response?.status ? `(Code: ${err.response.status})` : '(Erreur réseau)';
+      setError(prev => ({ ...prev, stats: `Échec de la récupération des statistiques ${statusText}.` }));
+      showToast("Impossible de charger les statistiques.", 'error');
+      setStatistics(null); // Clear previous stats
+      setSummaryStats({ totalRdv: 0, totalQuotes: 0, acceptedRate: 0 }); // Reset summary
+    } finally {
+      if (isMountedRef.current) setLoading(prev => ({ ...prev, stats: false }));
+    }
+  }, [granularity, comparePrevious, showToast]); // Dependencies
 
-    // Define colors for the chart bars
-    const chartColors = ['#8884d8', '#82ca9d', '#ffc658', '#ff7f50', '#8dd1e1', '#ffbb28', '#00C49F'];
+  // --- Debounce Hooks ---
+  useDebounce(() => {
+    setDebouncedUserSearch(userSearch);
+  }, 500, [userSearch]);
 
-    // --- Set Active Section ---
-    const setSection = (section) => {
-        setActiveSection(section);
-        setSidebarOpen(false); // Close sidebar when a section is selected
+  useEffect(() => { // Fetch users when debounced search or filters change
+    if (userRole === 'superviseur' && !loading.auth && isMountedRef.current) {
+      fetchUsers(0, userRowsPerPage, debouncedUserSearch, selectedRoleFilter); // Reset to page 0 on filter change
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedUserSearch, userRowsPerPage, selectedRoleFilter, userRole, loading.auth, fetchUsers]); // Add fetchUsers dependency
+
+  useDebounce(() => {
+    setDebouncedQuoteSearch(quoteSearch);
+  }, 500, [quoteSearch]);
+
+  useEffect(() => { // Fetch quotes when debounced search changes
+    if (userRole === 'superviseur' && !loading.auth && isMountedRef.current) {
+      fetchQuotes(0, quoteRowsPerPage, debouncedQuoteSearch); // Reset to page 0 on search change
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedQuoteSearch, quoteRowsPerPage, userRole, loading.auth, fetchQuotes]); // Add fetchQuotes dependency
+
+
+  // --- Authorization and Initial Data Fetch ---
+  useEffect(() => {
+    isMountedRef.current = true;
+    const checkAuthAndFetch = async () => {
+      if (!isMountedRef.current) return;
+      setLoading(prev => ({ ...prev, auth: true }));
+      setError(prev => ({ ...prev, general: null }));
+      const token = localStorage.getItem('token');
+      if (!token) {
+        navigate('/login'); // Redirect if no token
+        return;
+      }
+      try {
+        // Verify token and get user role
+        const response = await apiClient.get('/user'); // Generic endpoint to get user info
+        if (!isMountedRef.current) return;
+
+        // *** CHECK FOR SUPERVISOR ROLE ***
+        const isSupervisor = response.data?.roles?.some(role => role.name === 'superviseur');
+
+        if (isSupervisor) {
+          setUserRole('superviseur');
+          // Fetch initial data required for the dashboard
+          await Promise.all([
+            fetchUsers(userPage, userRowsPerPage, debouncedUserSearch, selectedRoleFilter),
+            fetchAppointments(appointmentFetchPage, appointmentFetchRowsPerPage), // Fetch appointments
+            fetchQuotes(quotePage, quoteRowsPerPage, debouncedQuoteSearch), // Fetch quotes
+            fetchStatistics(statsMonth, statsYear) // Fetch initial stats
+          ]);
+        } else {
+          // If not a supervisor, show error and log out
+          setError(prev => ({ ...prev, general: 'Accès refusé : Rôle superviseur requis.' }));
+          showToast('Accès refusé : Rôle superviseur requis.', 'error');
+          handleSupervisorLogout(); // Use the specific logout handler
+        }
+      } catch (err) {
+        console.error("Auth check failed (Supervisor):", err); // Dev log
+        if (!isMountedRef.current) return;
+        const message = err.response?.status === 401
+          ? 'Session expirée. Veuillez vous reconnecter.'
+          : 'Échec de l\'authentification. Veuillez vous reconnecter.';
+        setError(prev => ({ ...prev, general: message }));
+        showToast(message, 'error');
+        handleSupervisorLogout(); // Use the specific logout handler on auth error
+      } finally {
+        if (isMountedRef.current) setLoading(prev => ({ ...prev, auth: false }));
+      }
+    };
+    checkAuthAndFetch();
+
+    // Cleanup function
+    return () => {
+      isMountedRef.current = false;
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigate]); // Only run on mount/navigate change
+
+  // --- Pusher/Echo Event Listeners ---
+  useEffect(() => {
+    // Ensure Echo is initialized and user is a supervisor
+    if (!window.Echo || userRole !== 'superviseur') return;
+
+    // *** LISTEN ON SUPERVISOR CHANNEL ***
+    const supervisorChannel = window.Echo.private('role.superviseur'); // Use the correct channel name
+
+    // Handler for new appointments relevant to supervisors
+    const handleAppointmentCreated = (event) => {
+      console.log('Pusher: appointment.created received (Supervisor)', event); // Dev log
+      const agentName = `${event.agent?.name || ''} ${event.agent?.last_name || ''}`.trim() || 'un agent';
+      const date = event.date ? new Date(event.date).toLocaleDateString('fr-FR') : 'N/A';
+      showToast(`📅 Nouveau RDV par ${agentName} le ${date}`, 'info');
+      // Refetch data that might have changed
+      fetchAppointments(appointmentFetchPage, appointmentFetchRowsPerPage);
+      if (activeSection === 'statistics') fetchStatistics(statsMonth, statsYear); // Refresh stats if viewing
+    };
+    supervisorChannel.listen('.appointment.created', handleAppointmentCreated);
+
+    // Handler for clinic quote uploads relevant to supervisors
+    const handleClinicQuoteUploaded = (event) => {
+      console.log('Pusher: clinic.quote.uploaded received (Supervisor)', event); // Dev log
+      const clinicName = event.clinique?.name || 'une clinique';
+      const patientName = `${event.patient?.name || ''} ${event.patient?.last_name || ''}`.trim() || 'un patient';
+      showToast(`📄 Devis téléchargé par ${clinicName} pour ${patientName}`, 'info');
+      // Appointment data likely contains the quote URL, so refetch
+      fetchAppointments(appointmentFetchPage, appointmentFetchRowsPerPage);
+      // Optionally refresh stats if relevant
+      // if (activeSection === 'statistics') fetchStatistics(statsMonth, statsYear);
+    };
+    supervisorChannel.listen('.clinic.quote.uploaded', handleClinicQuoteUploaded);
+
+    // Handler for when a supervisor (or admin acting on behalf) sends a quote
+    const handleQuoteSentToPatient = (event) => {
+        console.log('Pusher: quote.sent.to.patient received (Supervisor)', event); // Dev log
+        const patientName = `${event.patient?.name || ''} ${event.patient?.last_name || ''}`.trim() || 'un patient';
+        // Determine who sent it if possible from event data (e.g., event.sender_role)
+        const sender = 'Le système'; // Default or derive from event data
+        showToast(`📨 ${sender} a envoyé un devis au patient ${patientName}`, 'info');
+        // Refetch quotes as the status/sent_at field has changed
+        fetchQuotes(quotePage, quoteRowsPerPage, debouncedQuoteSearch);
+        // Optionally refresh stats
+         if (activeSection === 'statistics') fetchStatistics(statsMonth, statsYear);
+    };
+    supervisorChannel.listen('.quote.sent.to.patient', handleQuoteSentToPatient);
+
+
+    // Handler for appointment status updates
+const handleAppointmentStatusUpdated = (event) => {
+  const status = event.status || 'mis à jour';
+  const patientName = `${event.patient?.name || ''} ${event.patient?.last_name || ''}`.trim() || 'le patient';
+  showToast(`📌 Statut du RDV pour ${patientName} mis à jour: ${status}`, 'info');
+  fetchAppointments(appointmentFetchPage, appointmentFetchRowsPerPage);
+  if (activeSection === 'statistics') fetchStatistics(statsMonth, statsYear);
+};
+supervisorChannel.listen('.appointment.status.updated', handleAppointmentStatusUpdated);
+
+
+    // Cleanup: Stop listening when component unmounts or role changes
+    return () => {
+      console.log('Stopping Pusher listeners (Supervisor)'); // Dev log
+      supervisorChannel.stopListening('.appointment.created', handleAppointmentCreated);
+      supervisorChannel.stopListening('.clinic.quote.uploaded', handleClinicQuoteUploaded);
+      supervisorChannel.stopListening('.quote.sent.to.patient', handleQuoteSentToPatient);
+      supervisorChannel.stopListening('.appointment.status.updated', handleAppointmentStatusUpdated);
+
+      // Consider leaving the channel if appropriate, e.g., window.Echo.leave('role.superviseur');
+    };
+    // Ensure dependencies cover all state/functions used inside
+  }, [userRole, fetchAppointments, fetchQuotes, fetchStatistics, showToast, activeSection, statsMonth, statsYear, appointmentFetchPage, appointmentFetchRowsPerPage, quotePage, quoteRowsPerPage, debouncedQuoteSearch]);
+
+
+  // Effect for fetching statistics when filters change
+  useEffect(() => {
+    if (userRole === 'superviseur' && !loading.auth && isMountedRef.current) {
+      fetchStatistics(statsMonth, statsYear);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statsMonth, statsYear, granularity, comparePrevious, userRole, loading.auth, fetchStatistics]); // Add fetchStatistics dependency
+
+  // Auto Refresh Logic for Statistics
+  useEffect(() => {
+    let intervalId = null;
+    if (autoRefresh && isMountedRef.current && activeSection === 'statistics' && userRole === 'superviseur') {
+      intervalId = setInterval(() => {
+        showToast('🔄 Rafraîchissement automatique des statistiques...', 'info', 2000);
+        fetchStatistics(statsMonth, statsYear);
+      }, 60000); // Refresh every 60 seconds
+      console.log('Auto-refresh interval started (Supervisor)'); // Dev log
+    }
+    // Cleanup interval on unmount or when conditions change
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        console.log('Auto-refresh interval cleared (Supervisor)'); // Dev log
+      }
+    };
+  }, [autoRefresh, activeSection, userRole, statsMonth, statsYear, fetchStatistics, showToast]);
+
+  // --- CRUD Handlers ---
+  const handleSaveUser = async () => {
+    const isEditing = !!currentUser;
+    // Use currentUser if editing, newUser if creating
+    const userDataToSave = isEditing ? { ...currentUser, password: currentUser.password || undefined } : { ...newUser };
+
+    // Basic Validation
+    if (!userDataToSave.name || !userDataToSave.last_name || !userDataToSave.email || !userDataToSave.role) {
+      setError(prev => ({ ...prev, dialog: "Veuillez remplir tous les champs obligatoires (Prénom, Nom, Email, Rôle)." }));
+      showToast("Veuillez remplir tous les champs obligatoires.", 'error'); return;
+    }
+    if (!isEditing && !userDataToSave.password) {
+      setError(prev => ({ ...prev, dialog: "Le mot de passe est requis pour les nouveaux utilisateurs." }));
+      showToast("Le mot de passe est requis pour les nouveaux utilisateurs.", 'error'); return;
+    }
+    if (userDataToSave.password && userDataToSave.password.length < 8) {
+      setError(prev => ({ ...prev, dialog: "Le mot de passe doit comporter au moins 8 caractères." }));
+      showToast("Le mot de passe doit comporter au moins 8 caractères.", 'error'); return;
+    }
+
+    setError(prev => ({ ...prev, dialog: null })); // Clear previous dialog errors
+
+    // *** USE SUPERVISOR ENDPOINT ***
+    const url = isEditing ? `/superviseur/users/${currentUser.id}` : '/superviseur/users';
+    const method = isEditing ? 'put' : 'post';
+
+    try {
+      const response = await apiClient[method](url, userDataToSave, { headers: { 'Content-Type': 'application/json' } });
+      closeUserDialog(); // Close dialog on success
+      // Refetch users list to show changes
+      fetchUsers(userPage, userRowsPerPage, debouncedUserSearch, selectedRoleFilter);
+      const actionText = isEditing ? 'mis à jour' : 'créé';
+      showToast(`L'utilisateur "${response.data.name || userDataToSave.name}" a été ${actionText} avec succès.`, 'success');
+    } catch (err) {
+      console.error(`Failed to ${isEditing ? 'update' : 'create'} user (Supervisor):`, err.response?.data); // Dev Log
+      const errors = err.response?.data?.errors;
+      let errorMsg = `Échec de la ${isEditing ? 'mise à jour' : 'création'} de l'utilisateur.`;
+      if (errors) {
+        // Concatenate validation errors
+        errorMsg += " " + Object.values(errors).flat().join(' ');
+      } else {
+        // Use server message or a generic one
+        errorMsg += " " + (err.response?.data?.message || 'Veuillez vérifier les détails et réessayer.');
+      }
+      setError(prev => ({ ...prev, dialog: errorMsg })); // Show error in the dialog
+      showToast(errorMsg, 'error'); // Also show a toast notification
+    }
+  };
+
+  const toggleUserStatus = async (userId, currentStatus) => {
+    // Find the user to get their current status if not passed directly
+    // const user = users.find(u => u.id === userId);
+    // if (!user) return;
+    openConfirmationModal({
+        title: `${currentStatus ? 'Désactiver' : 'Activer'} Utilisateur`,
+        message: `Êtes-vous sûr de vouloir ${currentStatus ? 'désactiver' : 'activer'} ce compte utilisateur ?`,
+        confirmText: currentStatus ? 'Désactiver' : 'Activer',
+        onConfirm: async () => {
+            try {
+                // *** USE SUPERVISOR ENDPOINT ***
+                const response = await apiClient.post(`/superviseur/users/${userId}/toggle-status`);
+                const isActive = response.data?.is_active; // Assuming API returns the new status
+                showToast(`Compte utilisateur ${isActive ? 'activé' : 'désactivé'}.`, 'success');
+                // Refetch users to update the list
+                fetchUsers(userPage, userRowsPerPage, debouncedUserSearch, selectedRoleFilter);
+                closeConfirmationModal(); // Close modal on success
+            } catch (err) {
+                console.error("Failed to toggle user status (Supervisor):", err); // Dev Log
+                showToast("Échec de la modification du statut de l'utilisateur. " + (err.response?.data?.message || ''), 'error');
+                // Keep modal open on error, loading state is handled by handleModalConfirm
+                setModalLoading(false); // Ensure loading is reset
+            }
+        }
+    });
+  };
+
+  const viewPatientFiles = async (userId) => {
+    try {
+      // *** USE SUPERVISOR ENDPOINT ***
+      const responseFiles = await apiClient.get(`/superviseur/users/${userId}/patient-files`);
+      const files = responseFiles.data;
+
+      if (!files || files.length === 0) {
+        showToast('Ce patient n\'a ajouté aucun fichier.', 'info');
+        return;
+      }
+
+      // For simplicity, download the first file found. Modify if multiple files need handling.
+      const firstFile = files[0];
+      const fileId = firstFile.id;
+      const fileName = firstFile.file_name || `dossier_medical_${userId}_${fileId}.pdf`; // Construct a filename
+      const token = localStorage.getItem('token');
+
+      // *** USE SUPERVISOR ENDPOINT ***
+      const downloadUrlApi = `${apiClient.defaults.baseURL}/superviseur/files/${fileId}/download`;
+
+      // Use fetch for blob download to handle headers easily
+      const responseBlob = await fetch(downloadUrlApi, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/pdf', // Request PDF content type
+        }
+      });
+
+      if (!responseBlob.ok) {
+        // Try to get error details from the response body
+        let errorText = 'Erreur inconnue';
+        try {
+          const errorData = await responseBlob.json(); // Try parsing JSON error
+          errorText = errorData.message || JSON.stringify(errorData);
+        } catch (e) {
+          errorText = await responseBlob.text(); // Fallback to text error
+        }
+        throw new Error(`Échec du téléchargement avec le statut ${responseBlob.status}. ${errorText}`);
+      }
+
+      const blob = await responseBlob.blob(); // Get the file blob
+
+      // Create a temporary link to trigger download
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = downloadUrl;
+      a.download = fileName; // Set the desired filename
+      document.body.appendChild(a);
+      a.click(); // Simulate click to trigger download
+      document.body.removeChild(a); // Clean up the link
+      window.URL.revokeObjectURL(downloadUrl); // Release the object URL
+
+    } catch (err) {
+      console.error("Failed to fetch or download patient files (Supervisor):", err); // Dev Log
+      showToast("Échec du téléchargement du fichier patient. " + (err.message || ''), 'error');
+    }
+  };
+
+  // Function to open clinic quote URL (likely stored on appointment)
+  const viewClinicQuote = (url) => {
+    if (url) {
+      window.open(url, '_blank', 'noopener,noreferrer'); // Open in new tab securely
+    } else {
+      showToast('Aucun lien de devis clinique disponible.', 'info');
+    }
+  };
+
+  // Function to handle creating or updating a supervisor-generated quote
+  const handleCreateOrUpdateQuote = async () => {
+    const { appointment_id, assistance_items, total_clinique } = newQuote;
+
+    // Validation
+    if (!appointment_id) {
+      setError(prev => ({ ...prev, dialog: "Veuillez sélectionner un rendez-vous." }));
+      showToast("Veuillez sélectionner un rendez-vous.", 'error'); return;
+    }
+    if (!total_clinique || isNaN(parseFloat(total_clinique))) {
+      setError(prev => ({ ...prev, dialog: "Veuillez saisir un total clinique valide." }));
+      showToast("Veuillez saisir un total clinique valide.", 'error'); return;
+    }
+    if (!assistance_items || assistance_items.length === 0 || assistance_items.some(item => !item.label || !item.amount || isNaN(parseFloat(item.amount)))) {
+      setError(prev => ({ ...prev, dialog: "Veuillez compléter tous les éléments d'assistance avec des libellés et des montants valides." }));
+      showToast("Veuillez compléter tous les éléments d'assistance.", 'error'); return;
+    }
+
+    setError(prev => ({ ...prev, dialog: null })); // Clear dialog error
+
+    // Prepare data payload
+    const quoteData = {
+      appointment_id: Number(appointment_id), // Ensure ID is a number
+      total_clinique: parseFloat(total_clinique),
+      assistance_items: assistance_items.map(item => ({
+        label: item.label,
+        amount: parseFloat(item.amount) // Ensure amount is a number
+      })),
     };
 
-    // --- Render Logic ---
+    // Determine endpoint and method (create vs update)
+    // *** USE SUPERVISOR ENDPOINT ***
+    const endpoint = currentQuoteId ? `/superviseur/quotes/${currentQuoteId}` : '/superviseur/quotes';
+    const method = currentQuoteId ? 'put' : 'post';
+    const actionText = currentQuoteId ? 'mis à jour' : 'créé';
 
-    // Loading state during initial authentication check
-    if (loading.auth) {
-        return (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-                <CircularProgress />
-                <Typography sx={{ ml: 2 }}>Verifying Authentication...</Typography>
-            </Box>
-        );
+    try {
+      await apiClient[method](endpoint, quoteData);
+      showToast(`Devis ${actionText} avec succès ! Le PDF sera généré/mis à jour par le système.`, 'success');
+      closeQuoteDialog(); // Close dialog on success
+      // Refetch relevant data
+      fetchQuotes(quotePage, quoteRowsPerPage, debouncedQuoteSearch);
+      fetchAppointments(appointmentFetchPage, appointmentFetchRowsPerPage); // Appointments might be linked
+      if (activeSection === 'statistics') fetchStatistics(statsMonth, statsYear); // Refresh stats if viewing
+
+    } catch (err) {
+      console.error(`Failed to ${actionText} quote (Supervisor):`, err.response?.data || err.message); // Dev Log
+      let msg = `Échec de la ${currentQuoteId ? 'mise à jour' : 'création'} du devis.`;
+      if (err.response?.data?.message) {
+        msg += ` ${err.response.data.message}`;
+      } else if (err.response?.data?.errors) {
+        // Concatenate validation errors
+        msg += ' ' + Object.values(err.response.data.errors).flat().join(' ');
+      } else {
+        msg += ' Une erreur inattendue s\'est produite.';
+      }
+      setError(prev => ({ ...prev, dialog: msg })); // Show error in dialog
+      showToast(msg, 'error'); // Show toast error
     }
+  };
 
-    // If authentication failed or user is not an admin (and not loading anymore)
-    if (!userRole && !loading.auth) {
-        return (
-            <Container sx={{ mt: 4 }}>
-                <Alert severity="error">{error.general || 'Access Denied. Administrator role required.'}</Alert>
-                <Button variant="outlined" onClick={() => navigate('/login')} sx={{ mt: 2 }}>Go to Login</Button>
-            </Container>
-        );
+
+  // Handler for supervisor logout action
+  const handleSupervisorLogout = () => {
+    logout(); // Call the logout function from the useAuth hook
+  };
+
+  // --- Dialog Management ---
+  const openUserDialog = (user = null) => {
+    setError(prev => ({ ...prev, dialog: null })); // Clear dialog errors
+    if (user) {
+      // Editing existing user
+      const roleName = user.roles?.length > 0 ? user.roles[0].name : (user.role || ''); // Get role name
+      setCurrentUser({
+        ...user,
+        password: '', // Clear password field for editing
+        role: roleName,
+        telephone: user.telephone || '', // Populate optional fields
+        adresse: user.adresse || ''
+      });
+      setNewUser({ name: '', last_name: '', email: '', password: '', role: '', telephone: '', adresse: '' }); // Clear newUser form
+    } else {
+      // Adding new user
+      setNewUser({ name: '', last_name: '', email: '', password: '', role: '', telephone: '', adresse: '' }); // Reset newUser form
+      setCurrentUser(null); // Ensure no currentUser is set
     }
+    setIsUserDialogOpen(true); // Open the dialog
+  };
 
-    // Main Dashboard Layout
-    return (
-        <Box sx={{ display: 'flex', height: '100vh' }}> {/* Use flex display for sidebar layout */}
-            <ToastContainer position="top-right" autoClose={5000} hideProgressBar={false} newestOnTop={false} closeOnClick rtl={false} pauseOnFocusLoss draggable pauseOnHover theme="colored" />
-            {/* AppBar */}
-            <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}> {/* Ensure AppBar is above Drawer */}
-                <Toolbar>
-                    <IconButton
-                        edge="start"
-                        color="inherit"
-                        aria-label="menu"
-                        onClick={() => setSidebarOpen(!sidebarOpen)} // Toggle sidebar
-                        sx={{ mr: 2 }} // Add margin to the right of the icon
-                    >
-                        <MenuIcon />
-                    </IconButton>
-                    <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-                        Supervisor Dashboard
-                    </Typography>
-                    <Button color="inherit" onClick={handleLogout} startIcon={<LogoutIcon />}>Logout</Button>
-                </Toolbar>
-            </AppBar>
+  const closeUserDialog = () => {
+    setIsUserDialogOpen(false);
+    // Reset state after dialog closes
+    setCurrentUser(null);
+    setNewUser({ name: '', last_name: '', email: '', password: '', role: '', telephone: '', adresse: '' });
+    setError(prev => ({ ...prev, dialog: null })); // Clear dialog errors
+  };
 
-            {/* Sidebar Drawer */}
-            <Drawer
-                variant="persistent" // Or 'temporary' if you prefer it to overlay content
-                anchor="left"
-                open={sidebarOpen}
-                onClose={() => setSidebarOpen(false)} // Allow closing temporary drawer by clicking outside
-                sx={{
-                    width: 240,
-                    flexShrink: 0,
-                    [`& .MuiDrawer-paper`]: { // Style the paper inside the drawer
-                        width: 240,
-                        boxSizing: 'border-box',
-                        // backgroundColor: 'primary.main', // Example styling
-                        // color: 'primary.contrastText', // Example styling
-                        top: '64px', // Position below AppBar (adjust if AppBar height changes)
-                        height: 'calc(100% - 64px)',
-                    },
-                }}
-            >
-                <Toolbar /> {/* Add Toolbar space to align content below AppBar */}
-                <Box sx={{ overflow: 'auto' }}>
-                    <List>
-                        <ListItem button selected={activeSection === 'statistics'} onClick={() => setSection('statistics')}>
-                            <ListItemIcon> <BarChartIcon /> </ListItemIcon>
-                            <ListItemText primary="Statistics" />
-                        </ListItem>
-                        <ListItem button selected={activeSection === 'users'} onClick={() => setSection('users')}>
-                            <ListItemIcon> <PeopleIcon /> </ListItemIcon>
-                            <ListItemText primary="User Management" />
-                        </ListItem>
-                        <ListItem button selected={activeSection === 'appointments'} onClick={() => setSection('appointments')}>
-                            <ListItemIcon> <EventIcon /> </ListItemIcon>
-                            <ListItemText primary="Appointments" />
-                        </ListItem>
-                        <ListItem button selected={activeSection === 'quotes'} onClick={() => setSection('quotes')}>
-                            <ListItemIcon> <RequestQuoteIcon /> </ListItemIcon>
-                            <ListItemText primary="Quotes" />
-                        </ListItem>
-                    </List>
-                </Box>
-            </Drawer>
+  const openQuoteDialog = (quoteToModify = null) => {
+    setError(prev => ({ ...prev, dialog: null })); // Clear dialog errors
 
-            {/* Main Content Area */}
-            <Box
-                component="main"
-                sx={{
-                    flexGrow: 1,
-                    p: 3,
-                    mt: '64px', // AppBar height
-                    height: 'calc(100vh - 64px)', // Full height minus AppBar
-                    overflow: 'auto', // Allow scrolling within content area
-                    transition: (theme) => theme.transitions.create('margin', { // Smooth transition for margin shift
-                        easing: theme.transitions.easing.sharp,
-                        duration: theme.transitions.duration.leavingScreen,
-                    }),
-                    marginLeft: sidebarOpen ? `240px` : 0, // Shift content when drawer is open
-                }}
-            >
-                {/* General Error Alert (only shown if no dialogs are open) */}
-                {error.general && !isUserDialogOpen && !isDeleteDialogOpen && !isQuoteDialogOpen &&
-                    <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(prev => ({ ...prev, general: null }))}>
-                        {error.general}
-                    </Alert>
-                }
-
-                {/* --- Statistics Section --- */}
-                {activeSection === 'statistics' && (
-                    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                        <CardHeader
-                            title="Platform Statistics"
-                            subheader={statsMonth && statsYear ? `Appointments per Day per Agent for ${String(statsMonth).padStart(2, '0')}/${statsYear}` : 'Select month and year'}
-                        />
-                        <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                            <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
-                                {/* Month Selector */}
-                                <FormControl sx={{ minWidth: 150 }} size="small">
-                                    <InputLabel id="stats-month-label">Month</InputLabel>
-                                    <Select
-                                        labelId="stats-month-label"
-                                        value={statsMonth}
-                                        label="Month"
-                                        onChange={(e) => setStatsMonth(e.target.value)}
-                                        disabled={loading.stats}
-                                    >
-                                        {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                                            <MenuItem key={m} value={String(m)}>
-                                                {new Date(0, m - 1).toLocaleString('default', { month: 'long' })}
-                                            </MenuItem>
-                                        ))}
-                                    </Select>
-                                </FormControl>
-                                {/* Year Selector */}
-                                <FormControl sx={{ minWidth: 120 }} size="small">
-                                    <InputLabel id="stats-year-label">Year</InputLabel>
-                                    <Select
-                                        labelId="stats-year-label"
-                                        value={statsYear}
-                                        label="Year"
-                                        onChange={(e) => setStatsYear(e.target.value)}
-                                        disabled={loading.stats}
-                                    >
-                                        {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(y => (
-                                            <MenuItem key={y} value={String(y)}>{y}</MenuItem>
-                                        ))}
-                                    </Select>
-                                </FormControl>
-                                {loading.stats && <CircularProgress size={24} sx={{ ml: 2 }} />}
-                            </Box>
-                            {/* Chart Area */}
-                            <Box sx={{ flexGrow: 1, minHeight: 300 }}> {/* Ensure chart area can grow */}
-                                {loading.stats ? (
-                                    <Skeleton variant="rectangular" width="100%" height="100%" animation="wave" />
-                                ) : statistics && chartData.length > 0 ? (
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                                            <CartesianGrid strokeDasharray="3 3" />
-                                            <XAxis dataKey="day" />
-                                            <YAxis allowDecimals={false} />
-                                            <RechartsTooltip />
-                                            <Legend />
-                                            {/* Render bars for each valid dataset */}
-                                            {statistics.datasets
-                                                .filter(ds => ds && ds.label && Array.isArray(ds.data))
-                                                .map((dataset, idx) => (
-                                                    <Bar key={dataset.label || idx} dataKey={dataset.label} fill={chartColors[idx % chartColors.length]} />
-                                                ))}
-                                        </BarChart>
-                                    </ResponsiveContainer>
-                                ) : error.stats ? (
-                                    <Alert severity="warning">{error.stats}</Alert>
-                                ) : (
-                                    <Typography sx={{ color: 'text.secondary', textAlign: 'center', mt: 4 }}>
-                                        No appointment data available for the selected period.
-                                    </Typography>
-                                )}
-                            </Box>
-                        </CardContent>
-                    </Card>
-                )}
-
-                {/* --- User Management Section --- */}
-                {activeSection === 'users' && (
-                    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                        <CardHeader
-                            title="User Management"
-                            action={
-                                <Button variant="contained" startIcon={<AddIcon />} onClick={() => openUserDialog()}>
-                                    Add User
-                                </Button>
-                            }
-                        />
-                        <CardContent sx={{ flexGrow: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}> {/* Allow content to grow and hide overflow */}
-                            {/* Filter Controls Box */}
-                            <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', alignItems: 'center', flexShrink: 0 }}>
-                                <TextField
-                                    label="Search Users (Name or Email)"
-                                    variant="outlined"
-                                    value={userSearch}
-                                    onChange={(e) => setUserSearch(e.target.value)}
-                                    sx={{ flexGrow: 1, minWidth: 200 }} // Allow search to grow
-                                    size="small"
-                                    disabled={loading.users}
-                                />
-                                {/* **NEW** Role Filter Dropdown */}
-                                <FormControl size="small" sx={{ minWidth: 200 }}>
-                                    <InputLabel id="role-filter-label">Filter by Role</InputLabel>
-                                    <Select
-                                        labelId="role-filter-label"
-                                        value={selectedRoleFilter}
-                                        onChange={(e) => setSelectedRoleFilter(e.target.value)} // Update state on change
-                                        label="Filter by Role"
-                                        disabled={loading.users}
-                                    >
-                                        <MenuItem value=""><em>All Roles</em></MenuItem>
-                                        {/* Use the globally defined roles array */}
-                                        {roles.map(role => (
-                                            <MenuItem key={role} value={role}>{role.charAt(0).toUpperCase() + role.slice(1)}</MenuItem>
-                                        ))}
-                                    </Select>
-                                </FormControl>
-                            </Box>
-
-                            {error.users && <Alert severity="warning" sx={{ mb: 2, flexShrink: 0 }}>{error.users}</Alert>}
-                            {/* Table Container with fixed height */}
-                            <TableContainer component={Paper} sx={{ flexGrow: 1, overflow: 'auto' }}> {/* Table takes remaining space */}
-                                <Table stickyHeader sx={{ minWidth: 650 }} aria-label="user table">
-                                    <TableHead>
-                                        <TableRow>
-                                            <TableCell>Name</TableCell>
-                                            <TableCell>Email</TableCell>
-                                            <TableCell>Role(s)</TableCell>
-                                            <TableCell>Status</TableCell>
-                                            <TableCell align="right">Actions</TableCell>
-                                        </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                        {loading.users ? (
-                                            // Skeleton rows
-                                            Array.from(new Array(userRowsPerPage)).map((_, index) => (
-                                                <TableRow key={`skel-user-${index}`}>
-                                                    <TableCell><Skeleton animation="wave" /></TableCell>
-                                                    <TableCell><Skeleton animation="wave" /></TableCell>
-                                                    <TableCell><Skeleton animation="wave" /></TableCell>
-                                                    <TableCell><Skeleton animation="wave" /></TableCell>
-                                                    <TableCell align="right">
-                                                        <Skeleton variant="circular" width={24} height={24} sx={{ display: 'inline-block', mr: 0.5 }} />
-                                                        <Skeleton variant="circular" width={24} height={24} sx={{ display: 'inline-block', mr: 0.5 }} />
-                                                        <Skeleton variant="rectangular" width={70} height={24} sx={{ display: 'inline-block', borderRadius: 1, ml: 0.5 }} />
-                                                        <Skeleton variant="rectangular" width={80} height={24} sx={{ display: 'inline-block', borderRadius: 1, ml: 0.5 }} />
-                                                    </TableCell>
-                                                </TableRow>
-                                            ))
-                                        ) : users.length > 0 ? users.map((user) => ( // Map over the 'users' state (already filtered by backend)
-                                            // Actual user rows
-                                            <TableRow hover key={user.id}>
-                                                <TableCell component="th" scope="row">{user.name} {user.last_name}</TableCell>
-                                                <TableCell>{user.email}</TableCell>
-                                                <TableCell>{user.roles?.map(r => r.name).join(', ') || user.role || 'N/A'}</TableCell>
-                                                <TableCell>
-                                                    <Box component="span" sx={{ color: user.is_active ? 'success.main' : 'error.main', fontWeight: 'medium' }}>
-                                                        {user.is_active ? 'Active' : 'Inactive'}
-                                                    </Box>
-                                                </TableCell>
-                                                <TableCell align="right">
-                                                    {/* Edit Button */}
-                                                    <Tooltip title="Edit User" arrow>
-                                                        <IconButton size="small" onClick={() => openUserDialog(user)} aria-label="edit user">
-                                                            <EditIcon fontSize="small" />
-                                                        </IconButton>
-                                                    </Tooltip>
-                                                    {/* Delete Button */}
-                                                    <Tooltip title="Delete User" arrow>
-                                                        <IconButton size="small" onClick={() => openDeleteDialog(user)} color="error" aria-label="delete user">
-                                                            <DeleteIcon fontSize="small" />
-                                                        </IconButton>
-                                                    </Tooltip>
-                                                    {/* Enable/Disable Button */}
-                                                    <Tooltip title={user.is_active ? 'Deactivate User' : 'Activate User'} arrow>
-                                                        <Button
-                                                            size="small"
-                                                            onClick={() => toggleUserStatus(user.id)}
-                                                            color={user.is_active ? 'warning' : 'success'}
-                                                            sx={{ ml: 1, mr: 0.5, minWidth: '70px' }}
-                                                            variant="outlined"
-                                                        >
-                                                            {user.is_active ? 'Disable' : 'Enable'}
-                                                        </Button>
-                                                    </Tooltip>
-                                                    {/* View Patient PDFs Button (Conditional) */}
-                                                    {user.roles?.some(r => r.name === 'patient') && (
-                                                        <Tooltip title="View Patient Uploaded Files" arrow>
-                                                            <Button
-                                                                size="small"
-                                                                onClick={() => viewPatientFiles(user.id)}
-                                                                sx={{ ml: 0.5 }}
-                                                                variant="text"
-                                                            >
-                                                                View PDFs
-                                                            </Button>
-                                                        </Tooltip>
-                                                    )}
-                                                </TableCell>
-                                            </TableRow>
-                                        )) : (
-                                            // No users found row
-                                            <TableRow><TableCell colSpan={5} align="center">No users found matching the criteria.</TableCell></TableRow>
-                                        )}
-                                    </TableBody>
-                                </Table>
-                            </TableContainer>
-                            {/* Pagination */}
-                            <TablePagination
-                                rowsPerPageOptions={userRowsPerPageOptions}
-                                component="div"
-                                count={userTotalRows}
-                                rowsPerPage={userRowsPerPage}
-                                page={userPage}
-                                onPageChange={handleChangeUserPage}
-                                onRowsPerPageChange={handleChangeUserRowsPerPage}
-                                sx={{ flexShrink: 0 }} // Prevent pagination from shrinking
-                            />
-                        </CardContent>
-                    </Card>
-                )}
-
-                {/* --- Appointments Section --- */}
-                {/* Note: This section might only be needed if you display appointments in a table */}
-                {/* If only needed for the dropdown, you might hide this section */}
-                {activeSection === 'appointments' && (
-                    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                        <CardHeader title="Recent Appointments (Table View)" />
-                        <CardContent sx={{ flexGrow: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                            {error.appointments && <Alert severity="warning" sx={{ mb: 2, flexShrink: 0 }}>{error.appointments}</Alert>}
-                            <TableContainer component={Paper} sx={{ flexGrow: 1, overflow: 'auto' }}>
-                                <Table stickyHeader size="small" aria-label="recent appointments table">
-                                    <TableHead>
-                                        <TableRow>
-                                            <TableCell>Prospect</TableCell>
-                                            <TableCell>Date</TableCell>
-                                            <TableCell>Status</TableCell>
-                                        </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                        {loading.appointments ? (
-                                            // Use the correct rows per page for skeleton
-                                            Array.from(new Array(appointmentRowsPerPage)).map((_, index) => (
-                                                <TableRow key={`skel-appt-${index}`}><TableCell colSpan={3}><Skeleton animation="wave" /></TableCell></TableRow>
-                                            ))
-                                        ) : appointments.length > 0 ? appointments.map(appt => ( // Map over the full appointments list
-                                            <TableRow hover key={appt.id}>
-                                                <TableCell>{appt.prenom_du_prospect} {appt.nom_du_prospect}</TableCell>
-                                                <TableCell>{appt.date_du_rdv ? new Date(appt.date_du_rdv).toLocaleDateString() : 'N/A'}</TableCell>
-                                                <TableCell>
-                                                    {/* Display the status */}
-                                                    {appt.status || 'N/A'}
-
-                                                    {/* Conditionally display the Link if clinic_quote_url exists */}
-                                                    {appt.clinic_quote_url && (
-                                                        <Box sx={{ mt: 0.5 }}> {/* Add a little space above the link */}
-                                                            <Link
-                                                                href={appt.clinic_quote_url} // Use the URL from the appointment data
-                                                                target="_blank"             // Open in a new tab
-                                                                rel="noopener noreferrer"   // Security measure for target="_blank"
-                                                                variant="body2"             // Use a smaller text style
-                                                                sx={{
-                                                                    fontSize: '0.85em',     // Further reduce font size slightly
-                                                                    fontWeight: 'medium',
-                                                                    display: 'inline-block', // Prevents taking full width
-                                                                    // Optional: Add specific color if needed, e.g., color: 'primary.main'
-                                                                }}
-                                                            >
-                                                                View Clinic Quote
-                                                            </Link>
-                                                        </Box>
-                                                    )}
-                                                </TableCell>
-                                            </TableRow>
-                                        )) : (
-                                            <TableRow><TableCell colSpan={3} align="center">No recent appointments.</TableCell></TableRow>
-                                        )}
-                                    </TableBody>
-                                </Table>
-                            </TableContainer>
-                            {/* Pagination for the appointments table (if shown) */}
-                            {/* <TablePagination
-                                rowsPerPageOptions={appointmentRowsPerPageOptions}
-                                component="div"
-                                count={appointmentTotalRows}
-                                rowsPerPage={appointmentRowsPerPage}
-                                page={appointmentPage}
-                                onPageChange={handleChangeAppointmentPage}
-                                onRowsPerPageChange={handleChangeAppointmentRowsPerPage}
-                                sx={{ flexShrink: 0 }}
-                            /> */}
-                            <Typography variant="caption" sx={{ mt: 1, color: 'text.secondary' }}>
-                                Note: Appointments list might show more entries than pagination suggests, as it fetches all for the quote dropdown.
-                            </Typography>
-                        </CardContent>
-                    </Card>
-                )}
-
-                {/* --- Quotes Section --- */}
-                {activeSection === 'quotes' && (
-                    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                        {/* Add Button to Card Header */}
-                        <CardHeader
-                            title="Recent Quotes"
-                            action={
-                                <Button variant="contained" startIcon={<AddIcon />} onClick={() => setIsQuoteDialogOpen(true)}>
-                                    Add Quote
-                                </Button>
-                            }
-                        />
-                        <CardContent sx={{ flexGrow: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                            <TextField
-                                label="Search Quotes (Prospect Name/ID)"
-                                variant="outlined"
-                                fullWidth
-                                value={quoteSearch}
-                                onChange={(e) => setQuoteSearch(e.target.value)}
-                                sx={{ mb: 2, flexShrink: 0 }}
-                                size="small"
-                                disabled={loading.quotes}
-                            />
-                            {error.quotes && <Alert severity="warning" sx={{ mb: 2, flexShrink: 0 }}>{error.quotes}</Alert>}
-                            <TableContainer component={Paper} sx={{ flexGrow: 1, overflow: 'auto' }}>
-                                <Table stickyHeader size="small" aria-label="recent quotes table">
-                                    <TableHead>
-                                        <TableRow>
-                                            <TableCell>ID</TableCell>
-                                            <TableCell>Prospect (Appt)</TableCell>
-                                            <TableCell>PDF Contains Amount</TableCell> {/* Header already renamed */}
-                                            <TableCell>Status</TableCell>
-                                            <TableCell>Comment</TableCell>
-                                            <TableCell align="center">PDF</TableCell>
-                                        </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                        {loading.quotes ? (
-                                            Array.from(new Array(quoteRowsPerPage)).map((_, index) => (
-                                                <TableRow key={`skel-quote-${index}`}>
-                                                    <TableCell><Skeleton animation="wave" /></TableCell>
-                                                    <TableCell><Skeleton animation="wave" /></TableCell>
-                                                    <TableCell><Skeleton animation="wave" /></TableCell>
-                                                    <TableCell><Skeleton animation="wave" /></TableCell>
-                                                    <TableCell><Skeleton animation="wave" /></TableCell>
-                                                    <TableCell align="center"><Skeleton variant="rectangular" width={80} height={24} animation="wave" /></TableCell>
-                                                </TableRow>
-                                            ))
-                                        ) : quotes.length > 0 ? quotes.map(quote => (
-                                            <TableRow hover key={quote.id}>
-                                                <TableCell>{quote.id}</TableCell>
-                                                {/* Prospect Display */}
-                                                <TableCell>
-                                                    {quote.appointment
-                                                        ? `${quote.appointment.prenom_du_prospect || ''} ${quote.appointment.nom_du_prospect || ''}`.trim()
-                                                        : <Typography variant="caption" color="textSecondary">No Appointment</Typography>}
-                                                </TableCell>
-                                                {/* Amount Column Display */}
-                                                <TableCell>
-                                                    {(quote.file_path || quote.filename) // Check if either file_path or filename exists
-                                                        ? <Typography variant="body2" color="textSecondary">See PDF</Typography>
-                                                        : <Typography variant="caption" color="textSecondary">No file</Typography>}
-                                                </TableCell>
-                                                <TableCell>{quote.status || 'N/A'}</TableCell>
-                                                {/* Comment Cell with Tooltip */}
-                                                <TableCell sx={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                    {quote.status === 'refused' ? ( // Only show comment if status is refused
-                                                        quote.comment ? (
-                                                            <Tooltip title={quote.comment} arrow>
-                                                                <span>{quote.comment}</span>
-                                                            </Tooltip>
-                                                        ) : (
-                                                            <Typography variant="caption" color="textSecondary">No comment</Typography>
-                                                        )
-                                                    ) : (
-                                                        '-' // Show dash if status is not refused
-                                                    )}
-                                                </TableCell>
-                                                {/* PDF Download/Upload Cell */}
-                                                <TableCell align="center">
-                                                    {(quote.file_path || quote.filename) ? (
-                                                        // Download Button if file exists
-                                                        <Tooltip title={`Download PDF (${quote.filename || 'Quote'})`} arrow>
-                                                            <Button
-                                                                size="small"
-                                                                variant="outlined"
-                                                                onClick={async () => {
-                                                                    try {
-                                                                        const token = localStorage.getItem('token');
-                                                                        // Ensure baseURL doesn't have trailing slash if endpoint starts with one
-                                                                        const downloadEndpoint = `${apiClient.defaults.baseURL}/superviseur/quotes/${quote.id}/download`;
-                                                                        const response = await fetch(downloadEndpoint, {
-                                                                            method: 'GET',
-                                                                            headers: { Authorization: `Bearer ${token}`, Accept: 'application/pdf' }
-                                                                        });
-                                                                        if (!response.ok) {
-                                                                            const errorText = await response.text(); // Get error details
-                                                                            console.error('Download failed:', response.status, errorText);
-                                                                            throw new Error(`Download failed (${response.status}).`);
-                                                                        }
-                                                                        const blob = await response.blob();
-                                                                        const downloadUrl = window.URL.createObjectURL(blob);
-                                                                        const a = document.createElement('a');
-                                                                        a.href = downloadUrl;
-                                                                        a.download = quote.filename || `quote_${quote.id}.pdf`;
-                                                                        document.body.appendChild(a);
-                                                                        a.click();
-                                                                        document.body.removeChild(a);
-                                                                        window.URL.revokeObjectURL(downloadUrl);
-                                                                    } catch (err) {
-                                                                        console.error('Error downloading PDF:', err);
-                                                                        toast.error(`Could not download PDF. ${err.message}`);
-                                                                    }
-                                                                }}
-                                                                sx={{ minWidth: '90px' }}
-                                                            >
-                                                                Download
-                                                            </Button>
-                                                        </Tooltip>
-                                                    ) : (
-                                                        // Upload Button if no file exists (for updating existing quote's file)
-                                                        <Tooltip title="Upload Quote PDF" arrow>
-                                                            <Button
-                                                                size="small"
-                                                                variant="text" // Use text variant for upload trigger
-                                                                component="label" // Make button act as a label for the hidden input
-                                                                sx={{ minWidth: '90px' }}
-                                                            >
-                                                                Upload
-                                                                <Typography variant="caption" color="textSecondary" sx={{ ml: 0.5, display: 'inline' }}>
-                                                                    (Max: 20MB)
-                                                                </Typography>
-                                                                <input
-                                                                    type="file"
-                                                                    hidden
-                                                                    accept="application/pdf"
-                                                                    // Clear value on click to allow re-uploading the same file
-                                                                    onClick={(e) => { e.target.value = ''; }}
-                                                                    onChange={(e) => handleUploadQuoteFile(quote.id, e.target.files?.[0])}
-                                                                />
-                                                            </Button>
-                                                        </Tooltip>
-                                                    )}
-                                                </TableCell>
-                                            </TableRow>
-                                        )) : (
-                                            <TableRow><TableCell colSpan={6} align="center">No recent quotes found.</TableCell></TableRow>
-                                        )}
-                                    </TableBody>
-                                </Table>
-                            </TableContainer>
-                            <TablePagination
-                                rowsPerPageOptions={quoteRowsPerPageOptions}
-                                component="div"
-                                count={quoteTotalRows}
-                                rowsPerPage={quoteRowsPerPage}
-                                page={quotePage}
-                                onPageChange={handleChangeQuotePage}
-                                onRowsPerPageChange={handleChangeQuoteRowsPerPage}
-                                sx={{ flexShrink: 0 }}
-                            />
-                        </CardContent>
-                    </Card>
-                )}
-            </Box>
-
-            {/* --- Dialogs --- */}
-
-            {/* User Create/Edit Dialog */}
-            <Dialog open={isUserDialogOpen} onClose={closeUserDialog} maxWidth="sm" fullWidth>
-                <DialogTitle>{currentUser ? 'Edit User' : 'Add New User'}</DialogTitle>
-                <DialogContent>
-                    {/* Show general errors specific to the dialog */}
-                    {error.general && isUserDialogOpen && <Alert severity="error" sx={{ mb: 1 }}>{error.general}</Alert>}
-                    <Box component="form" noValidate autoComplete="off" sx={{ mt: 1 }}>
-                        <Grid container spacing={2}>
-                            <Grid item xs={12} sm={6}>
-                                <TextField required fullWidth margin="dense" id="name" label="First Name" name="name" value={currentUser ? currentUser.name : newUser.name} onChange={(e) => currentUser ? setCurrentUser({ ...currentUser, name: e.target.value }) : setNewUser({ ...newUser, name: e.target.value })} autoFocus />
-                            </Grid>
-                            <Grid item xs={12} sm={6}>
-                                <TextField required fullWidth margin="dense" id="last_name" label="Last Name" name="last_name" value={currentUser ? currentUser.last_name : newUser.last_name} onChange={(e) => currentUser ? setCurrentUser({ ...currentUser, last_name: e.target.value }) : setNewUser({ ...newUser, last_name: e.target.value })} />
-                            </Grid>
-                            <Grid item xs={12}>
-                                <TextField required fullWidth margin="dense" id="email" label="Email Address" name="email" type="email" value={currentUser ? currentUser.email : newUser.email} onChange={(e) => currentUser ? setCurrentUser({ ...currentUser, email: e.target.value }) : setNewUser({ ...newUser, email: e.target.value })} />
-                            </Grid>
-                            <Grid item xs={12}>
-                                <TextField
-                                    required={false}
-                                    fullWidth
-                                    margin="dense"
-                                    id="password"
-                                    label={currentUser ? 'New Password (optional)' : 'Password'}
-                                    name="password"
-                                    type="password"
-                                    value={currentUser ? currentUser.password : newUser.password} // Use correct state
-                                    onChange={(e) => currentUser ? setCurrentUser({ ...currentUser, password: e.target.value }) : setNewUser({ ...newUser, password: e.target.value })}
-                                    helperText="Leave empty. A password setup email will be sent automatically."
-
-                                />
-                            </Grid>
-                            <Grid item xs={12}>
-                                <FormControl fullWidth required margin="dense">
-                                    <InputLabel id="role-select-label">Role</InputLabel>
-                                    <Select
-                                        labelId="role-select-label"
-                                        id="role-select"
-                                        value={currentUser ? currentUser.role : newUser.role} // Use correct state
-                                        label="Role"
-                                        onChange={(e) => currentUser ? setCurrentUser({ ...currentUser, role: e.target.value }) : setNewUser({ ...newUser, role: e.target.value })}
-                                    >
-                                        <MenuItem value="" disabled><em>Select Role</em></MenuItem>
-                                        {/* Use the globally defined roles array */}
-                                        {roles.map(role => (<MenuItem key={role} value={role}>{role.charAt(0).toUpperCase() + role.slice(1)}</MenuItem>))}
-                                    </Select>
-                                </FormControl>
-                            </Grid>
-                        </Grid>
-                    </Box>
-                </DialogContent>
-                <DialogActions sx={{ px: 3, pb: 2 }}>
-                    <Button onClick={closeUserDialog} color="inherit">Cancel</Button>
-                    <Button onClick={handleSaveUser} variant="contained" color="primary">{currentUser ? 'Save Changes' : 'Create User'}</Button>
-                </DialogActions>
-            </Dialog>
-
-            {/* Delete Confirmation Dialog */}
-            <Dialog open={isDeleteDialogOpen} onClose={closeDeleteDialog} aria-labelledby="delete-confirm-dialog-title" aria-describedby="delete-confirm-dialog-description">
-                <DialogTitle id="delete-confirm-dialog-title">Confirm Deletion</DialogTitle>
-                <DialogContent>
-                    <DialogContentText id="delete-confirm-dialog-description">
-                        Are you sure you want to delete the user "{userToDelete?.name}"? This action cannot be easily undone.
-                    </DialogContentText>
-                    {/* Show general errors specific to the delete dialog */}
-                    {error.general && isDeleteDialogOpen && <Alert severity="error" sx={{ mt: 2 }}>{error.general}</Alert>}
-                </DialogContent>
-                <DialogActions sx={{ px: 3, pb: 2 }}>
-                    <Button onClick={closeDeleteDialog} color="inherit">Cancel</Button>
-                    <Button onClick={confirmDeleteUser} color="error" variant="contained" autoFocus>Delete User</Button>
-                </DialogActions>
-            </Dialog>
-
-            {/* Add Quote Dialog */}
-            <Dialog open={isQuoteDialogOpen} onClose={() => setIsQuoteDialogOpen(false)} maxWidth="sm" fullWidth>
-                <DialogTitle>Add New Quote</DialogTitle>
-                <DialogContent>
-                    {/* Appointment Selection Dropdown */}
-                    <FormControl fullWidth margin="normal" required error={!newQuote.appointment_id && isQuoteDialogOpen}> {/* Add error state if needed */}
-                        <InputLabel id="appt-select-label">Appointment</InputLabel>
-                        <Select
-                            labelId="appt-select-label"
-                            id="appt-select"
-                            value={newQuote.appointment_id}
-                            onChange={(e) => setNewQuote({ ...newQuote, appointment_id: e.target.value })}
-                            label="Appointment" // Ensure label is linked
-                        >
-                            <MenuItem value="" disabled>
-                                <em>Select an Appointment</em>
-                            </MenuItem>
-                            {/* Map over the fetched appointments state */}
-                            {loading.appointments ? (
-                                <MenuItem value="" disabled><em>Loading appointments...</em></MenuItem>
-                            ) : appointments.length > 0 ? (
-                                // Dropdown Logic:
-                                appointments.map((appt) => {
-                                    // Check if a quote already exists for this appointment ID
-                                    const alreadyQuoted = quotes.some(q => q.appointment_id === appt.id);
-                                    return (
-                                        <MenuItem key={appt.id} value={appt.id} disabled={alreadyQuoted}>
-                                            {`${appt.prenom_du_prospect || ''} ${appt.nom_du_prospect || ''}`.trim()}
-                                            {appt.date_du_rdv ? ` (${new Date(appt.date_du_rdv).toLocaleDateString()})` : ''}
-                                            {` - ID: ${appt.id}`}
-                                            {alreadyQuoted ? " (Already has quote)" : ""}
-                                        </MenuItem>
-                                    );
-                                })
-                            ) : (
-                                <MenuItem value="" disabled>
-                                    <em>No appointments available or failed to load.</em>
-                                </MenuItem>
-                            )}
-                        </Select>
-                        {/* Optional: Add helper text or error display here */}
-                    </FormControl>
-
-                    {/* PDF Upload Button */}
-                    <Button
-                        variant="outlined"
-                        component="label" // Acts as a label for the hidden input
-                        fullWidth
-                        sx={{ mt: 2 }}
-                        color={!newQuote.file && isQuoteDialogOpen ? "error" : "primary"} // Indicate if file is missing
-                    >
-                        {newQuote.file ? `Selected: ${newQuote.file.name}` : 'Upload Quote PDF (Required)'}
-                        <input
-                            type="file"
-                            hidden // Hide the default browser input
-                            accept="application/pdf" // Only accept PDF files
-                            // Clear value on click to allow re-selecting the same file if needed
-                            onClick={(e) => { e.target.value = ''; }}
-                            onChange={(e) => setNewQuote({ ...newQuote, file: e.target.files?.[0] || null })} // Update state with the selected file
-                        />
-                    </Button>
-                    <Typography variant="caption" display="block" sx={{ mt: 1, color: 'text.secondary' }}>
-                        Max file size: 20MB. Only PDF format accepted.
-                    </Typography>
-                </DialogContent>
-                <DialogActions sx={{ px: 3, pb: 2 }}>
-                    {/* Cancel Button */}
-                    <Button onClick={() => {
-                        setIsQuoteDialogOpen(false);
-                        setNewQuote({ appointment_id: '', file: null }); // Reset form on cancel
-                    }} color="inherit">Cancel</Button>
-                    {/* Create Button - triggers handleCreateQuote */}
-                    <Button onClick={handleCreateQuote} variant="contained" color="primary">
-                        Create Quote
-                    </Button>
-                </DialogActions>
-            </Dialog>
-
-        </Box> /* End Root Flex Box */
+    // Determine which appointments are available for selection
+    // Exclude appointments already having a supervisor quote (unless editing that specific quote)
+    const supervisorQuoteIds = new Set(
+      quotes
+        .filter(q => !q.is_clinic && q.appointment_id !== null && q.id !== quoteToModify?.id) // Filter supervisor quotes, exclude self if editing
+        .map(q => q.appointment_id)
     );
+
+    // Filter available appointments
+    const available = appointments.filter(appt =>
+        !supervisorQuoteIds.has(appt.id) || // Not already quoted by supervisor
+        (quoteToModify && appt.id === quoteToModify.appointment_id) // Or is the appointment of the quote being edited
+    );
+    setAvailableAppointments(available);
+
+    if (quoteToModify) {
+      // Editing existing quote
+      setCurrentQuoteId(quoteToModify.id);
+      setNewQuote({
+        // Ensure appointment_id is correctly sourced (might be directly on quote or nested)
+        appointment_id: quoteToModify.appointment_id || quoteToModify.appointment?.id || '',
+        total_clinique: quoteToModify.total_clinique || '',
+        // Map assistance items, provide default if none exist
+        assistance_items: quoteToModify.assistance_quotes?.map(aq => ({ label: aq.label, amount: aq.amount })) || [{ label: '', amount: '' }],
+      });
+    } else {
+      // Adding new quote
+      setCurrentQuoteId(null);
+      // Reset quote form state
+      setNewQuote({ appointment_id: '', total_clinique: '', assistance_items: [{ label: '', amount: '' }] });
+    }
+    setIsQuoteDialogOpen(true); // Open the dialog
+  };
+
+  const closeQuoteDialog = () => {
+    setIsQuoteDialogOpen(false);
+    // Reset state after dialog closes
+    setCurrentQuoteId(null);
+    setNewQuote({ appointment_id: '', total_clinique: '', assistance_items: [{ label: '', amount: '' }] });
+    setError(prev => ({ ...prev, dialog: null })); // Clear dialog errors
+    setAvailableAppointments([]); // Clear available appointments list
+  };
+
+  // --- Table Pagination Handlers ---
+  const handleChangeUserPage = (newPage) => {
+    // Fetch data for the new page
+    fetchUsers(newPage, userRowsPerPage, debouncedUserSearch, selectedRoleFilter);
+  };
+  const handleChangeUserRowsPerPage = (newLimit) => {
+    // Fetch data with the new limit, resetting to page 0
+    fetchUsers(0, newLimit, debouncedUserSearch, selectedRoleFilter);
+  };
+
+  // Client-side pagination handlers for the Appointments View Table
+  const handleChangeAppointmentViewPage = (newPage) => {
+    setAppointmentViewPage(newPage);
+  };
+  const handleChangeAppointmentViewRowsPerPage = (newLimit) => {
+    setAppointmentViewRowsPerPage(newLimit);
+    setAppointmentViewPage(0); // Reset to first page when rows per page changes
+  };
+
+  // Server-side pagination handlers for Quotes Table
+  const handleChangeQuotePage = (newPage) => {
+    // Fetch data for the new quote page
+    fetchQuotes(newPage, quoteRowsPerPage, debouncedQuoteSearch);
+  };
+  const handleChangeQuoteRowsPerPage = (newLimit) => {
+    // Fetch data with new limit, reset to page 0
+    fetchQuotes(0, newLimit, debouncedQuoteSearch);
+  };
+
+
+  // --- Memoized Data for Tables & Charts ---
+
+  // Filter appointments for the display table based on selected filters
+  const filteredAppointmentsForTable = useMemo(() => {
+    return appointments.filter(appt => {
+      const statusMatch = !appointmentStatusFilter || appt.status?.toLowerCase() === appointmentStatusFilter.toLowerCase();
+      const serviceMatch = !appointmentServiceFilter || appt.service?.toLowerCase() === appointmentServiceFilter.toLowerCase();
+      return statusMatch && serviceMatch;
+    });
+  }, [appointments, appointmentStatusFilter, appointmentServiceFilter]);
+
+  // Paginate the filtered appointments for the display table
+  const paginatedAppointmentsForTable = useMemo(() => {
+    const start = appointmentViewPage * appointmentViewRowsPerPage;
+    const end = start + appointmentViewRowsPerPage;
+    return filteredAppointmentsForTable.slice(start, end);
+  }, [filteredAppointmentsForTable, appointmentViewPage, appointmentViewRowsPerPage]);
+
+  // Filter quotes for the display table based on selected filters
+  const filteredQuotesForTable = useMemo(() => {
+    // Filter only supervisor quotes (assuming !is_clinic indicates supervisor quote)
+    return quotes.filter(q => {
+        const isSupervisorQuote = !q.is_clinic; // Adjust this condition based on your data model
+        const statusMatch = !quoteStatusFilter || q.status?.toLowerCase() === quoteStatusFilter.toLowerCase();
+        // Match service based on the linked appointment
+        const serviceMatch = !quoteServiceFilter || q.appointment?.service?.toLowerCase() === quoteServiceFilter.toLowerCase();
+        return isSupervisorQuote && statusMatch && serviceMatch;
+    });
+}, [quotes, quoteStatusFilter, quoteServiceFilter]);
+
+  // Note: Quotes pagination is handled server-side by fetchQuotes,
+  // so we directly use the `quotes` state which holds the current page's data.
+  // No client-side pagination needed here if fetchQuotes implements server pagination.
+
+  // Prepare data for the statistics chart
+  const chartData = useMemo(() => {
+    if (!statistics || !Array.isArray(statistics.labels) || !Array.isArray(statistics.datasets)) {
+      return []; // Return empty array if data is invalid
+    }
+    // Filter out potentially invalid datasets
+    const validDatasets = statistics.datasets.filter(ds => ds && ds.label && Array.isArray(ds.data));
+    // If no valid datasets but labels exist, return labels for axis rendering
+    if (validDatasets.length === 0 && statistics.labels.length > 0) {
+      return statistics.labels.map(label => ({ day: label })); // Use 'day' or whatever XAxis dataKey is
+    }
+    // Map labels and datasets to the format required by Recharts
+    return statistics.labels.map((label, index) => {
+      const dataPoint = { day: label }; // Key matches XAxis dataKey
+      validDatasets.forEach(dataset => {
+        // Assign data, defaulting to 0 if missing for this index
+        dataPoint[dataset.label] = dataset.data[index] ?? 0;
+      });
+      return dataPoint;
+    });
+  }, [statistics]); // Dependency: recalculate when statistics data changes
+
+  // Get unique appointment statuses for the filter dropdown
+  const appointmentStatusesForFilter = useMemo(() => {
+    const statuses = new Set(appointments.map(appt => appt.status).filter(Boolean));
+    return Array.from(statuses).sort(); // Sort alphabetically
+  }, [appointments]);
+
+  // Get unique appointment services for the filter dropdown
+  const appointmentServicesForFilter = useMemo(() => {
+    const services = new Set(appointments.map(appt => appt.service).filter(Boolean));
+    return Array.from(services).sort();
+  }, [appointments]);
+
+  // Get unique quote statuses for the filter dropdown
+  const quoteStatusesForFilter = useMemo(() => {
+      // Filter for supervisor quotes first if needed, then get statuses
+      const statuses = new Set(quotes.filter(q => !q.is_clinic).map(q => q.status).filter(Boolean));
+      return Array.from(statuses).sort();
+  }, [quotes]);
+
+  // Get unique quote services (from associated appointments) for the filter dropdown
+  const quoteServicesForFilter = useMemo(() => {
+      const services = new Set(quotes.filter(q => !q.is_clinic && q.appointment?.service).map(q => q.appointment.service));
+      return Array.from(services).sort();
+  }, [quotes]);
+
+
+  // --- UI Navigation & State Changes ---
+  const setSection = (section) => {
+    setActiveSection(section);
+    // Close sidebar on mobile when a section is selected
+    if (window.innerWidth < 992) { // Adjust breakpoint as needed
+      setSidebarOpen(false);
+    }
+  };
+
+  // Handlers for appointment filter changes
+  const handleAppointmentStatusFilterChange = (e) => {
+    setAppointmentStatusFilter(e.target.value);
+    setAppointmentViewPage(0); // Reset page when filter changes
+  };
+  const handleAppointmentServiceFilterChange = (e) => {
+    setAppointmentServiceFilter(e.target.value);
+    setAppointmentViewPage(0); // Reset page when filter changes
+  };
+
+  // Handlers for quote filter changes
+  const handleQuoteStatusFilterChange = (e) => {
+      setQuoteStatusFilter(e.target.value);
+      // Note: Quote pagination is server-side, so changing filters
+      // might require a refetch depending on implementation.
+      // For now, assume filtering applies to the currently fetched page.
+      // If filters should trigger refetch: fetchQuotes(0, quoteRowsPerPage, debouncedQuoteSearch);
+  };
+  const handleQuoteServiceFilterChange = (e) => {
+      setQuoteServiceFilter(e.target.value);
+      // See note above about refetching.
+  };
+
+  // --- Export Logic ---
+  const handleExportAsImage = async () => {
+    const element = chartContainerRef.current;
+    if (!element || typeof html2canvas === 'undefined') {
+      showToast('Fonctionnalité d\'exportation non prête ou élément non trouvé.', 'error');
+      console.error('html2canvas is not loaded or chart element not found.');
+      return;
+    }
+    try {
+      const canvas = await html2canvas(element, {
+          useCORS: true, // Important for external resources if any
+          allowTaint: true, // May be needed depending on content
+          backgroundColor: '#ffffff' // Set background color for transparency issues
+      });
+      const link = document.createElement('a');
+      link.download = `statistiques_superviseur_${statsYear}_${statsMonth}.png`; // Filename
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+      showToast('Graphique exporté en PNG.', 'success');
+    } catch (error) {
+      console.error('Error exporting chart as image:', error);
+      showToast('Erreur lors de l\'exportation en PNG.', 'error');
+    }
+  };
+
+  const handleExportAsPDF = async () => {
+    const element = chartContainerRef.current;
+    if (!element || typeof html2canvas === 'undefined' || typeof jsPDF === 'undefined') {
+      showToast('Fonctionnalité d\'exportation non prête ou élément non trouvé.', 'error');
+      console.error('html2canvas or jsPDF is not loaded or chart element not found.');
+      return;
+    }
+    try {
+      const canvas = await html2canvas(element, {
+          useCORS: true,
+          allowTaint: true,
+          backgroundColor: '#ffffff'
+      });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({
+          orientation: 'landscape', // 'portrait' or 'landscape'
+          unit: 'px', // Use pixels for direct mapping
+          // Calculate format based on canvas dimensions, maybe add padding
+          format: [canvas.width + 40, canvas.height + 40] // Add some padding
+      });
+      // Add image centered or at top-left with padding
+      pdf.addImage(imgData, 'PNG', 20, 20, canvas.width, canvas.height);
+      pdf.save(`statistiques_superviseur_${statsYear}_${statsMonth}.pdf`); // Filename
+      showToast('Graphique exporté en PDF.', 'success');
+    } catch (error) {
+      console.error('Error exporting chart as PDF:', error);
+      showToast('Erreur lors de l\'exportation en PDF.', 'error');
+    }
+  };
+
+
+  // --- Render Logic ---
+
+  // Loading state during initial authentication check
+  if (loading.auth) {
+    return (
+      <div className="loading-container dashboard-body">
+        <div className="simple-spinner"></div>
+        <p style={{ color: 'var(--text-light)', marginTop: '15px' }}>Vérification de l'authentification (Superviseur)...</p>
+      </div>
+    );
+  }
+
+  // If authentication failed or user is not a supervisor
+  if (!userRole && !loading.auth) {
+    return (
+      <div className="error-container dashboard-body">
+        <p>{error.general || 'Accès refusé : Rôle superviseur requis.'}</p>
+        <button onClick={() => navigate('/login')} className="action-button">Aller à la connexion</button>
+      </div>
+    );
+  }
+
+  // Main dashboard rendering
+  return (
+    <>
+      {/* Toast Notifications */}
+      {isToastVisible && (<ToastNotification message={toastMessage} type={toastType} />)}
+
+      {/* Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={isModalOpen}
+        onClose={closeConfirmationModal}
+        onConfirm={handleModalConfirm}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        confirmText={modalConfig.confirmText || 'Confirmer'}
+        cancelText={modalConfig.cancelText || 'Annuler'}
+        isLoading={modalLoading}
+      />
+
+      {/* Main Dashboard Layout */}
+      <div className="dashboard-body">
+        {/* Header */}
+        <header className="dashboard-header">
+          <button className="menu-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Basculer le menu">
+            {/* Menu Icon SVG */}
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+          </button>
+          <div className="header-title">Tableau de Bord Superviseur</div>
+          <div className="header-actions">
+            <button onClick={handleSupervisorLogout}>Déconnexion</button>
+          </div>
+        </header>
+
+        {/* Content Wrapper (Sidebar + Main Area) */}
+        <div className="main-content-wrapper">
+          {/* Sidebar */}
+          <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+            {/* Sidebar Navigation Buttons */}
+            <button className={`sidebar-button ${activeSection === 'statistics' ? 'active' : ''}`} onClick={() => setSection('statistics')}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18" /><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3" /></svg> Statistiques
+            </button>
+            <button className={`sidebar-button ${activeSection === 'users' ? 'active' : ''}`} onClick={() => setSection('users')}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg> Utilisateurs
+            </button>
+            <button className={`sidebar-button ${activeSection === 'appointments' ? 'active' : ''}`} onClick={() => setSection('appointments')}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg> Rendez-vous
+            </button>
+            <button className={`sidebar-button ${activeSection === 'quotes' ? 'active' : ''}`} onClick={() => setSection('quotes')}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" /></svg> Devis
+            </button>
+          </aside>
+
+          {/* Main Content Area */}
+          <main className="content-area">
+            {/* Overlay for closing sidebar on mobile */}
+            <div className="content-overlay" onClick={() => setSidebarOpen(false)}></div>
+
+            {/* General Error Display */}
+            {error.general && !isUserDialogOpen && !isQuoteDialogOpen && !isModalOpen && (
+              <div className="alert-message alert-message-error">
+                <span>{error.general}</span>
+                <button className="alert-close-btn" onClick={() => setError(prev => ({ ...prev, general: null }))}>×</button>
+              </div>
+            )}
+
+            {/* --- Statistics Section --- */}
+            {activeSection === 'statistics' && (
+              <section className="content-section">
+                <div className="section-header"><h3>Statistiques de la Plateforme (Superviseur)</h3></div>
+
+                {/* Summary Cards */}
+                 <div className="summary-cards">
+                  <div className="summary-card">📅 Total RDVs: {loading.stats ? '...' : summaryStats.totalRdv}</div>
+                  <div className="summary-card">📄 Devis Envoyés: {loading.stats ? '...' : summaryStats.totalQuotes}</div>
+                  <div className="summary-card">✅ Taux Acceptation: {loading.stats ? '...' : `${summaryStats.acceptedRate.toFixed(1)}%`}</div>
+                </div>
+
+                {/* Date Filters */}
+                <div className="filter-controls">
+                  <div className="form-group">
+                    <label htmlFor="stats-month-sv">Mois</label>
+                    <select id="stats-month-sv" value={statsMonth} onChange={(e) => setStatsMonth(e.target.value)} disabled={loading.stats}>
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (<option key={m} value={String(m)}>{new Date(0, m - 1).toLocaleString('fr-FR', { month: 'long' })}</option>))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="stats-year-sv">Année</label>
+                    <select id="stats-year-sv" value={statsYear} onChange={(e) => setStatsYear(e.target.value)} disabled={loading.stats}>
+                      {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(y => (<option key={y} value={String(y)}>{y}</option>))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Advanced Filters & Export */}
+                <div className="filter-controls advanced">
+                  <div className="form-group">
+                    <label htmlFor="granularity-select-sv" className="sr-only">Granularité</label>
+                    <select id="granularity-select-sv" value={granularity} onChange={(e) => setGranularity(e.target.value)} disabled={loading.stats}>
+                      <option value="daily">Quotidien</option>
+                      <option value="weekly">Hebdomadaire</option>
+                      <option value="monthly">Mensuel</option>
+                    </select>
+                  </div>
+                  <label className="checkbox-label">
+                    <input type="checkbox" checked={comparePrevious} onChange={(e) => setComparePrevious(e.target.checked)} disabled={loading.stats} />
+                    📊 Comparer Période Préc.
+                  </label>
+                  <label className="checkbox-label">
+                    <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
+                    🔄 Rafraîch. Auto (60s)
+                  </label>
+                  <button onClick={handleExportAsImage} disabled={loading.stats || !statistics} className="action-button button-small button-outline">📷 Exporter Image</button>
+                  <button onClick={handleExportAsPDF} disabled={loading.stats || !statistics} className="action-button button-small button-outline">📄 Exporter PDF</button>
+                  {loading.stats && <div className="simple-spinner" style={{ width: '24px', height: '24px', marginLeft: '10px' }}></div>}
+                </div>
+
+                {/* Chart Area */}
+                <div className="chart-container" ref={chartContainerRef} style={{ height: '400px', width: '100%', position: 'relative' }}>
+                  {loading.stats && (<div className="chart-loading-overlay"><div className="simple-spinner"></div></div>)}
+                  {!loading.stats && statistics && chartData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={chartData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color, #e2e8f0)" />
+                          <XAxis dataKey="day" stroke="var(--text-light, #64748b)" fontSize={12} />
+                          <YAxis allowDecimals={false} stroke="var(--text-light, #64748b)" fontSize={12} />
+                          <RechartsTooltip
+                            cursor={{ fill: 'rgba(194, 155, 110, 0.1)' }}
+                            contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.9)', border: '1px solid #ccc', borderRadius: '4px', fontSize: '12px' }}
+                          />
+                          <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} />
+                          {/* Render Bars and Lines based on dataset */}
+                          {statistics.datasets.filter(ds => ds && ds.label && Array.isArray(ds.data)).map((dataset, idx) => {
+                            const isComparison = dataset.label.toLowerCase().includes('précédente') || dataset.label.toLowerCase().includes('previous');
+                            return isComparison ? (
+                              <Line // Render comparison data as a Line
+                                key={`${dataset.label}-line-${idx}`}
+                                type="monotone"
+                                dataKey={dataset.label}
+                                stroke="#8884d8" // Distinct color for comparison line
+                                strokeWidth={2}
+                                dot={{ r: 3 }}
+                                strokeDasharray="5 5" // Dashed line for comparison
+                                name={dataset.label} // Name for Legend/Tooltip
+                              />
+                            ) : (
+                              <Bar // Render primary data as Bars
+                                key={`${dataset.label}-bar-${idx}`}
+                                dataKey={dataset.label}
+                                fill={chartColors[idx % chartColors.length]} // Cycle through colors
+                                radius={[4, 4, 0, 0]} // Rounded top corners
+                                name={dataset.label} // Name for Legend/Tooltip
+                              />
+                            );
+                          })}
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : !loading.stats && error.stats ? (
+                      <div className="alert-message alert-message-warning" style={{ margin: 'auto', maxWidth: '400px', textAlign: 'center' }}>
+                        <span>{error.stats}</span>
+                      </div>
+                    ) : !loading.stats && (!statistics || chartData.length === 0) ? (
+                      <p style={{ textAlign: 'center', color: 'var(--text-light, #64748b)', marginTop: '60px', fontSize: '1.1em' }}>
+                        Aucune donnée statistique disponible pour la période sélectionnée.
+                      </p>
+                    ): null /* Covers the case where loading is false but statistics is null initially */ }
+                </div>
+              </section>
+            )}
+
+            {/* --- Users Section --- */}
+            {activeSection === 'users' && (
+              <section className="content-section">
+                <div className="section-header">
+                  <h3>Gestion des Utilisateurs (Superviseur)</h3>
+                  {/* Add User Button - Check permissions if supervisor can add users */}
+                  <button className="action-button button-small" onClick={() => openUserDialog()}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Ajouter Utilisateur
+                  </button>
+                </div>
+
+                {/* User Filters */}
+                <div className="filter-controls">
+                  <div className="form-group">
+                    <label htmlFor="user-search-sv" className="sr-only">Rechercher Utilisateurs</label>
+                    <input id="user-search-sv" type="text" placeholder="Rechercher (Nom, Email)" value={userSearch} onChange={(e) => setUserSearch(e.target.value)} disabled={loading.users} />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="role-filter-sv" className="sr-only">Filtrer par Rôle</label>
+                    <select id="role-filter-sv" value={selectedRoleFilter} onChange={(e) => setSelectedRoleFilter(e.target.value)} disabled={loading.users}>
+                      <option value="">Tous les Rôles Gérés</option>
+                      {/* Show only roles the supervisor can manage */}
+                      {manageableRoles.map(role => (<option key={role} value={role}>{role.charAt(0).toUpperCase() + role.slice(1)}</option>))}
+                    </select>
+                  </div>
+                  {loading.users && <div className="simple-spinner" style={{ width: '24px', height: '24px' }}></div>}
+                </div>
+
+                {/* User Error Display */}
+                {error.users && <div className="alert-message alert-message-warning"><span>{error.users}</span></div>}
+
+                {/* Users Table */}
+                <div className="table-container responsive">
+                  <table className="styled-table">
+                    <thead>
+                      <tr>
+                        <th>Nom</th>
+                        <th>Email</th>
+                        <th>Téléphone</th>
+                        <th>Adresse</th>
+                        <th>Rôle(s)</th>
+                        <th>Statut</th>
+                        <th className="actions-cell">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loading.users ? (
+                        <tr><td colSpan="7" style={{ textAlign: 'center', padding: '30px' }}><div className="simple-spinner" style={{ margin: 'auto' }}></div></td></tr>
+                      ) : users.length > 0 ? users.map((user) => (
+                        <tr key={user.id}>
+                          <td><strong>{user.name} {user.last_name}</strong></td>
+                          <td>{user.email}</td>
+                          <td>{user.telephone || '-'}</td>
+                          <td>{user.adresse || '-'}</td>
+                          <td>{user.roles?.map(r => r.name).join(', ') || user.role || 'N/D'}</td>
+                          <td>
+                            <span className={user.is_active ? 'status-active' : 'status-inactive'}>
+                              {user.is_active ? 'Actif' : 'Inactif'}
+                            </span>
+                          </td>
+                          <td className="actions-cell">
+                            {/* Edit User */}
+                            <button className="action-button button-small button-icon-only button-outline" onClick={() => openUserDialog(user)} title="Modifier Utilisateur" aria-label="Modifier utilisateur">
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z"></path><path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd"></path></svg>
+                            </button>
+                            {/* Toggle Status */}
+                            <button className={`action-button button-small ${user.is_active ? 'button-warning' : 'button-success'}`} onClick={() => toggleUserStatus(user.id, user.is_active)} title={user.is_active ? 'Désactiver' : 'Activer'} style={{ minWidth: '95px' }}>
+                              {user.is_active ? 'Désactiver' : 'Activer'}
+                            </button>
+                            {/* View Patient Files (if user is patient) */}
+                            {user.roles?.some(r => r.name === 'patient') && (
+                              <button className="action-button button-small button-outline" onClick={() => viewPatientFiles(user.id)} title="Voir Fichiers Patient" style={{ minWidth: '90px' }}>
+                                Voir PDFs
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      )) : (
+                        <tr className="no-results-row"><td colSpan="7">Aucun utilisateur trouvé correspondant aux critères.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* User Pagination */}
+                <CustomPagination
+                    count={userTotalRows}
+                    rowsPerPage={userRowsPerPage}
+                    page={userPage}
+                    onPageChange={handleChangeUserPage}
+                    onRowsPerPageChange={handleChangeUserRowsPerPage}
+                    rowsPerPageOptions={userRowsPerPageOptions}
+                />
+              </section>
+            )}
+
+            {/* --- Appointments Section --- */}
+            {activeSection === 'appointments' && (
+              <section className="content-section">
+                <div className="section-header"><h3>Aperçu des Rendez-vous</h3></div>
+
+                {/* Appointment Filters */}
+                <div className="filter-controls">
+                    <div className="form-group">
+                        <label htmlFor="appointment-status-filter-sv" className="sr-only">Filtrer par Statut</label>
+                        <select
+                            id="appointment-status-filter-sv"
+                            value={appointmentStatusFilter}
+                            onChange={handleAppointmentStatusFilterChange}
+                            disabled={loading.appointments}
+                        >
+                            <option value="">Tous les Statuts</option>
+                            {appointmentStatusesForFilter.map(status => (
+                                <option key={status} value={status.toLowerCase()}>
+                                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                     <div className="form-group">
+                        <label htmlFor="appointment-service-filter-sv" className="sr-only">Filtrer par Service</label>
+                        <select
+                            id="appointment-service-filter-sv"
+                            value={appointmentServiceFilter}
+                            onChange={handleAppointmentServiceFilterChange}
+                            disabled={loading.appointments}
+                        >
+                            <option value="">Tous les Services</option>
+                            {appointmentServicesForFilter.map(service => (
+                                <option key={service} value={service.toLowerCase()}>
+                                    {service.charAt(0).toUpperCase() + service.slice(1)}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    {loading.appointments && <div className="simple-spinner" style={{ width: '24px', height: '24px', marginLeft: '10px' }}></div>}
+                </div>
+
+                {/* Appointment Error Display */}
+                {error.appointments && <div className="alert-message alert-message-warning"><span>{error.appointments}</span></div>}
+
+                {/* Appointments Table */}
+                <div className="table-container responsive">
+                  <table className="styled-table">
+                    <thead>
+                      <tr>
+                        {/* Adjust columns based on what a supervisor needs to see */}
+                        <th>Prospect</th>
+                        <th>Date RDV</th>
+                        <th>Service</th>
+                        <th>Agent</th>
+                        <th>Statut</th>
+                        <th>Devis Clinique</th>
+                        {/* Add other relevant columns: Type Soins, Qualification, etc. */}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loading.appointments && !paginatedAppointmentsForTable.length ? (
+                        <tr><td colSpan="6" style={{ textAlign: 'center', padding: '30px' }}><div className="simple-spinner" style={{ margin: 'auto' }}></div></td></tr>
+                      ) : paginatedAppointmentsForTable.length > 0 ? (
+                        paginatedAppointmentsForTable.map(appt => (
+                          <tr key={appt.id}>
+                            <td><strong>{appt.prenom_du_prospect} {appt.nom_du_prospect}</strong><br/><small>{appt.telephone || ''}</small></td>
+                            <td>{appt.date_du_rdv ? new Date(appt.date_du_rdv).toLocaleString('fr-TN', { dateStyle: 'short', timeStyle: 'short' }) : '-'}</td>
+                            <td>{appt.service || '-'}</td>
+                            <td>{appt.agent ? `${appt.agent.name} ${appt.agent.last_name}` : '-'}</td>
+                            <td>
+                              <span className={`status-badge ${appt.status?.toLowerCase().replace(/\s+/g, '-') || 'default'}`}>
+                                {appt.status || 'N/D'}
+                              </span>
+                            </td>
+                            <td>
+                              {appt.clinic_quote_url ? (
+                                <a href={appt.clinic_quote_url} target="_blank" rel="noopener noreferrer" className="quote-link-icon" title="Voir Devis Clinique">
+                                  📄 Voir
+                                </a>
+                              ) : '-'}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr className="no-results-row"><td colSpan="6">Aucun rendez-vous trouvé correspondant à vos critères.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Appointment Pagination (Client-side for display) */}
+                <CustomPagination
+                  count={filteredAppointmentsForTable.length} // Count based on filtered data
+                  rowsPerPage={appointmentViewRowsPerPage}
+                  page={appointmentViewPage}
+                  onPageChange={handleChangeAppointmentViewPage}
+                  onRowsPerPageChange={handleChangeAppointmentViewRowsPerPage}
+                  rowsPerPageOptions={appointmentViewRowsPerPageOptions}
+                />
+              </section>
+            )}
+
+            {/* --- Quotes Section --- */}
+            {activeSection === 'quotes' && (
+              <section className="content-section">
+                <div className="section-header">
+                  <h3>Devis Générés (Superviseur)</h3>
+                  {/* Add Quote Button */}
+                  <button className="action-button button-small" onClick={() => openQuoteDialog()}>
+                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg> Ajouter Devis
+                  </button>
+                </div>
+
+                {/* Quote Filters */}
+                <div className="filter-controls">
+                  <div className="form-group">
+                    <label htmlFor="quote-search-sv" className="sr-only">Rechercher Devis</label>
+                    <input id="quote-search-sv" type="text" placeholder="Rechercher (Prospect, ID)" value={quoteSearch} onChange={(e) => setQuoteSearch(e.target.value)} disabled={loading.quotes} />
+                  </div>
+                   <div className="form-group">
+                        <label htmlFor="quote-status-filter-sv" className="sr-only">Filtrer par Statut</label>
+                        <select
+                            id="quote-status-filter-sv"
+                            value={quoteStatusFilter}
+                            onChange={handleQuoteStatusFilterChange} // Use specific handler
+                            disabled={loading.quotes}
+                        >
+                            <option value="">Tous les Statuts</option>
+                            {quoteStatusesForFilter.map(status => ( // Use quote statuses
+                                <option key={status} value={status.toLowerCase()}>
+                                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                     <div className="form-group">
+                        <label htmlFor="quote-service-filter-sv" className="sr-only">Filtrer par Service</label>
+                        <select
+                            id="quote-service-filter-sv"
+                            value={quoteServiceFilter}
+                            onChange={handleQuoteServiceFilterChange} // Use specific handler
+                            disabled={loading.quotes}
+                        >
+                            <option value="">Tous les Services</option>
+                            {quoteServicesForFilter.map(service => ( // Use quote services
+                                <option key={service} value={service.toLowerCase()}>
+                                    {service.charAt(0).toUpperCase() + service.slice(1)}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                  {loading.quotes && <div className="simple-spinner" style={{ width: '24px', height: '24px' }}></div>}
+                </div>
+
+                {/* Quote Error Display */}
+                {error.quotes && <div className="alert-message alert-message-warning"><span>{error.quotes}</span></div>}
+
+                {/* Quotes Table */}
+                <div className="table-container responsive">
+                  <table className="styled-table">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Prospect (RDV)</th>
+                        <th>Date Création</th>
+                        <th>Total Clinique</th>
+                        <th>Statut</th>
+                        <th>Commentaire (si refusé)</th>
+                        <th className="actions-cell">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loading.quotes ? (
+                        <tr><td colSpan="7" style={{ textAlign: 'center', padding: '30px' }}><div className="simple-spinner" style={{ margin: 'auto' }}></div></td></tr>
+                      ) : quotes.filter(q => !q.is_clinic).length > 0 ? ( // Ensure filtering if needed, or rely on server filtering
+                          quotes.filter(q => !q.is_clinic) // Filter only supervisor quotes client-side if needed
+                          .filter(q => { // Apply client-side filters if server doesn't handle them fully
+                              const statusMatch = !quoteStatusFilter || q.status?.toLowerCase() === quoteStatusFilter.toLowerCase();
+                              const serviceMatch = !quoteServiceFilter || q.appointment?.service?.toLowerCase() === quoteServiceFilter.toLowerCase();
+                              return statusMatch && serviceMatch;
+                          })
+                          .map(quote => (
+                          <tr key={quote.id}>
+                            <td>{quote.id}</td>
+                            <td>
+                              <strong>
+                                {quote.appointment ? `${quote.appointment.prenom_du_prospect || ''} ${quote.appointment.nom_du_prospect || ''}` : <span style={{ color: 'var(--text-light)', fontStyle: 'italic' }}>N/A</span>}
+                              </strong>
+                              <br/>
+                              <small>RDV ID: {quote.appointment_id || '-'}</small>
+                            </td>
+                            <td>{quote.created_at ? new Date(quote.created_at).toLocaleDateString('fr-FR') : '-'}</td>
+                            <td>{quote.total_clinique ? `${Number(quote.total_clinique).toFixed(2)} DT` : '-'}</td>
+                             <td>
+                                <span className={`status-badge ${quote.status?.toLowerCase() || 'nd'}`}>
+                                    {quote.status === 'accepted' ? '✅ Accepté' :
+                                     quote.status === 'refused' ? '❌ Refusé' :
+                                     quote.status === 'pending' ? '⏳ En attente' :
+                                     quote.status || 'N/D'}
+                                </span>
+                            </td>
+                            <td className="comment-cell" data-tooltip={quote.status === 'refused' ? (quote.comment || 'Aucun commentaire fourni') : ''}>
+                              {quote.status === 'refused' ? (quote.comment || <span style={{ color: 'var(--text-light)', fontStyle: 'italic' }}>Aucun</span>) : '-'}
+                            </td>
+                            <td className="actions-cell">
+                              {/* Preview PDF */}
+                              <button
+                                className="action-button button-small button-icon-only button-outline"
+                                title="Prévisualiser PDF"
+                                onClick={() => {
+                                  const token = localStorage.getItem('token');
+                                  // *** USE SUPERVISOR ENDPOINT ***
+                                  const previewUrl = `${apiClient.defaults.baseURL}/superviseur/quotes/${quote.id}/preview?token=${token}`;
+                                  window.open(previewUrl, '_blank', 'noopener,noreferrer');
+                                }}
+                              >👁️</button>
+
+                              {/* Edit Quote (if not sent) */}
+                              {!quote.sent_to_patient_at && (
+                                <button className="action-button button-small button-icon-only button-outline" style={{ marginLeft: '5px' }} onClick={() => openQuoteDialog(quote)} title="Modifier Devis">
+                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z"></path><path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd"></path></svg>
+                                </button>
+                              )}
+
+                              {/* Export & Send (if not sent) */}
+                              {!quote.sent_to_patient_at ? (
+                                <button className="action-button button-small button-success" style={{ marginLeft: '5px', minWidth: '120px' }}
+                                  onClick={() => {
+                                    openConfirmationModal({
+                                      title: 'Envoyer le Devis au Patient',
+                                      message: `Voulez-vous exporter le PDF du devis #${quote.id} et l'envoyer au patient (${quote.appointment?.prenom_du_prospect || ''} ${quote.appointment?.nom_du_prospect || ''}) ?`,
+                                      confirmText: 'Oui, Exporter & Envoyer',
+                                      onConfirm: async () => {
+                                        // Note: handleModalConfirm sets loading state
+                                        try {
+                                          const token = localStorage.getItem('token');
+                                          // 1. Export PDF locally first (optional, but good UX)
+                                          // *** USE SUPERVISOR ENDPOINT ***
+                                          const pdfUrl = `${apiClient.defaults.baseURL}/superviseur/quotes/${quote.id}/export-pdf`;
+                                          const response = await fetch(pdfUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/pdf' } });
+                                          if (!response.ok) throw new Error(`Échec de l'exportation PDF (Code: ${response.status})`);
+                                          const blob = await response.blob();
+                                          const url = window.URL.createObjectURL(blob);
+                                          const a = document.createElement('a');
+                                          a.href = url; a.download = `devis_superviseur_${quote.id}.pdf`;
+                                          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                                          window.URL.revokeObjectURL(url);
+
+                                          // 2. Tell backend to mark as sent (and potentially email patient)
+                                          // *** USE SUPERVISOR ENDPOINT ***
+                                          await apiClient.post(`/superviseur/quotes/${quote.id}/send-to-patient`);
+
+                                          showToast('Devis exporté et marqué comme envoyé au patient !', 'success');
+                                          fetchQuotes(quotePage, quoteRowsPerPage, debouncedQuoteSearch); // Refresh list
+                                          closeConfirmationModal(); // Close modal on success
+                                        } catch (err) {
+                                          console.error("PDF export or send failed (Supervisor):", err); // Dev Log
+                                          showToast(`Échec de l'envoi : ${err.message}`, 'error');
+                                          // Keep modal open, loading state is handled by handleModalConfirm
+                                          setModalLoading(false); // Ensure loading is reset
+                                          // throw err; // Re-throw to signal failure to handleModalConfirm
+                                        }
+                                      }
+                                    });
+                                  }}
+                                >Exporter & Envoyer</button>
+                              ) : (
+                                <>
+                                <span style={{ color: '#666', fontStyle: 'italic', marginLeft:'5px', fontSize:'0.9em' }}>Envoyé</span>
+                                {/* Optional: Re-export button */}
+                                 <button
+                                    className="action-button button-small button-warning button-icon-only"
+                                    style={{ marginLeft: '5px' }}
+                                    title="Re-télécharger PDF"
+                                    onClick={() => {
+                                        openConfirmationModal({
+                                            title: 'Re-télécharger le Devis ?',
+                                            message: 'Ce devis a déjà été envoyé. Voulez-vous le re-télécharger ?',
+                                            confirmText: 'Oui, Télécharger',
+                                            onConfirm: async () => {
+                                                try {
+                                                    const token = localStorage.getItem('token');
+                                                    const exportUrl = `${apiClient.defaults.baseURL}/superviseur/quotes/${quote.id}/export-pdf`;
+                                                    const response = await fetch(exportUrl, { headers: { Authorization: `Bearer ${token}` } });
+                                                    if (!response.ok) throw new Error('Erreur export PDF');
+                                                    const blob = await response.blob();
+                                                    const url = window.URL.createObjectURL(blob);
+                                                    const a = document.createElement('a');
+                                                    a.href = url; a.download = `devis_superviseur_${quote.id}_reexport.pdf`;
+                                                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                                                    window.URL.revokeObjectURL(url);
+                                                    showToast("PDF re-téléchargé.", "success");
+                                                } catch (err) {
+                                                    console.error(err);
+                                                    showToast("Erreur lors du re-téléchargement.", "error");
+                                                } finally {
+                                                    closeConfirmationModal();
+                                                }
+                                            }
+                                        });
+                                    }}
+                                >
+                                    ♻️
+                                </button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr className="no-results-row"><td colSpan="7">Aucun devis superviseur trouvé.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Quote Pagination (Server-side) */}
+                <CustomPagination
+                    count={quoteTotalRows} // Use total rows from API
+                    rowsPerPage={quoteRowsPerPage}
+                    page={quotePage}
+                    onPageChange={handleChangeQuotePage} // Fetches new page data
+                    onRowsPerPageChange={handleChangeQuoteRowsPerPage} // Fetches new data with limit
+                    rowsPerPageOptions={quoteRowsPerPageOptions}
+                />
+              </section>
+            )}
+
+          </main> {/* End Content Area */}
+        </div> {/* End Main Content Wrapper */}
+      </div> {/* End Dashboard Body */}
+
+      {/* --- Dialogs --- */}
+
+      {/* User Create/Edit Dialog */}
+      <FormDialog
+        isOpen={isUserDialogOpen}
+        onClose={closeUserDialog}
+        title={currentUser ? 'Modifier Utilisateur' : 'Ajouter Nouveau Utilisateur'}
+        actions={
+          <>
+            <button onClick={closeUserDialog} className="modal-button cancel-button">Annuler</button>
+            <button onClick={handleSaveUser} className="modal-button confirm-button">
+              {currentUser ? 'Enregistrer Modifications' : 'Créer Utilisateur'}
+            </button>
+          </>
+        }
+      >
+        {/* Dialog Error Display */}
+        {error.dialog && <div className="alert-message alert-message-error" style={{ marginBottom: '15px' }}><span>{error.dialog}</span></div>}
+
+        {/* User Form Fields */}
+        <div className="form-grid">
+          <div className="form-group">
+            <label htmlFor="name-sv">Prénom *</label>
+            <input required id="name-sv" name="name" type="text" value={currentUser ? currentUser.name : newUser.name} onChange={(e) => currentUser ? setCurrentUser({ ...currentUser, name: e.target.value }) : setNewUser({ ...newUser, name: e.target.value })} autoFocus />
+          </div>
+          <div className="form-group">
+            <label htmlFor="last_name-sv">Nom *</label>
+            <input required id="last_name-sv" name="last_name" type="text" value={currentUser ? currentUser.last_name : newUser.last_name} onChange={(e) => currentUser ? setCurrentUser({ ...currentUser, last_name: e.target.value }) : setNewUser({ ...newUser, last_name: e.target.value })} />
+          </div>
+        </div>
+        <div className="form-group">
+          <label htmlFor="email-sv">Adresse Email *</label>
+          <input required id="email-sv" name="email" type="email" value={currentUser ? currentUser.email : newUser.email} onChange={(e) => currentUser ? setCurrentUser({ ...currentUser, email: e.target.value }) : setNewUser({ ...newUser, email: e.target.value })} />
+        </div>
+        <div className="form-group">
+          <label htmlFor="password-sv">{currentUser ? 'Nouveau Mot de Passe (optionnel)' : 'Mot de Passe *'}</label>
+          <input id="password-sv" name="password" type="password" placeholder={currentUser ? 'Laisser vide pour ne pas changer' : 'Minimum 8 caractères'} value={currentUser ? currentUser.password : newUser.password} onChange={(e) => currentUser ? setCurrentUser({ ...currentUser, password: e.target.value }) : setNewUser({ ...newUser, password: e.target.value })} />
+          {!currentUser && <small>Un email de configuration sera envoyé.</small>}
+        </div>
+         <div className="form-group">
+          <label htmlFor="telephone-sv">Téléphone</label>
+          <input
+            id="telephone-sv" name="telephone" type="tel"
+            value={currentUser ? currentUser.telephone : newUser.telephone}
+            onChange={(e) => currentUser ? setCurrentUser({ ...currentUser, telephone: e.target.value }) : setNewUser({ ...newUser, telephone: e.target.value })}
+          />
+        </div>
+        <div className="form-group">
+          <label htmlFor="adresse-sv">Adresse</label>
+          <input
+            id="adresse-sv" name="adresse" type="text"
+            value={currentUser ? currentUser.adresse : newUser.adresse}
+            onChange={(e) => currentUser ? setCurrentUser({ ...currentUser, adresse: e.target.value }) : setNewUser({ ...newUser, adresse: e.target.value })}
+           />
+        </div>
+        <div className="form-group">
+          <label htmlFor="role-select-sv">Rôle *</label>
+          <select required id="role-select-sv" value={currentUser ? currentUser.role : newUser.role} onChange={(e) => currentUser ? setCurrentUser({ ...currentUser, role: e.target.value }) : setNewUser({ ...newUser, role: e.target.value })}>
+            <option value="" disabled>Sélectionner Rôle</option>
+            {/* Only show roles the supervisor can manage */}
+            {manageableRoles.map(role => (<option key={role} value={role}>{role.charAt(0).toUpperCase() + role.slice(1)}</option>))}
+          </select>
+        </div>
+      </FormDialog>
+
+      {/* Quote Create/Edit Dialog */}
+      <FormDialog
+        isOpen={isQuoteDialogOpen}
+        onClose={closeQuoteDialog}
+        title={currentQuoteId ? 'Modifier Devis Superviseur' : 'Ajouter Nouveau Devis Superviseur'}
+        actions={
+          <>
+            <button onClick={closeQuoteDialog} className="modal-button cancel-button">Annuler</button>
+            <button onClick={handleCreateOrUpdateQuote} className="modal-button confirm-button">
+              {currentQuoteId ? 'Mettre à Jour Devis' : 'Créer Devis'}
+            </button>
+          </>
+        }
+      >
+        {/* Dialog Error Display */}
+        {error.dialog && <div className="alert-message alert-message-error" style={{ marginBottom: '15px' }}><span>{error.dialog}</span></div>}
+
+        {/* Quote Form Fields */}
+        <div className="form-group">
+          <label htmlFor="appt-select-sv">Rendez-vous Associé *</label>
+          {/* If editing, show read-only appointment */}
+          {currentQuoteId && newQuote.appointment_id ? (
+            <div className="readonly-appointment-label">
+              <strong>
+                {/* Find appointment name from the main list */}
+                {appointments.find(appt => String(appt.id) === String(newQuote.appointment_id))?.prenom_du_prospect || 'Prospect Inconnu'}{' '}
+                {appointments.find(appt => String(appt.id) === String(newQuote.appointment_id))?.nom_du_prospect || ''}
+              </strong> (ID: {newQuote.appointment_id})
+              <br/><small>Le rendez-vous ne peut pas être changé lors de la modification.</small>
+            </div>
+          ) : (
+            /* If creating, show dropdown of available appointments */
+            <select
+              id="appt-select-sv"
+              value={newQuote.appointment_id}
+              onChange={(e) => setNewQuote({ ...newQuote, appointment_id: e.target.value })}
+              required
+              disabled={!!currentQuoteId} // Disable if editing
+            >
+              <option value="" disabled>Sélectionner un Rendez-vous</option>
+              {loading.appointments && !availableAppointments.length ? (
+                  <option value="" disabled>Chargement...</option>
+              ) : availableAppointments.length > 0 ? (
+                availableAppointments.map((appt) => (
+                  <option key={appt.id} value={appt.id}>
+                    {`${appt.prenom_du_prospect || ''} ${appt.nom_du_prospect || ''}`.trim()}
+                    {appt.date_du_rdv ? ` (RDV: ${new Date(appt.date_du_rdv).toLocaleDateString('fr-FR')})` : ''} - ID: {appt.id}
+                  </option>
+                ))
+              ) : (
+                <option value="" disabled>Aucun RDV disponible pour nouveau devis.</option>
+              )}
+            </select>
+          )}
+        </div>
+
+        <div className="form-group">
+          <p style={{ fontSize: '0.9em', color: 'var(--text-light, #64748b)' }}>
+            Le PDF du devis sera généré/mis à jour par le système avec les détails du RDV et les éléments ci-dessous.
+          </p>
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="total_clinique-sv">Total Clinique (DT) *</label>
+          <input
+            id="total_clinique-sv" type="number" step="0.01" min="0"
+            placeholder="Ex: 1500.00"
+            value={newQuote.total_clinique}
+            onChange={(e) => setNewQuote({ ...newQuote, total_clinique: e.target.value })}
+            required
+          />
+        </div>
+
+        <div className="form-group">
+          <label>Éléments d'Assistance *</label>
+          {newQuote.assistance_items.map((item, index) => (
+            <div key={index} className="form-group-inline" style={{ marginBottom: '10px', alignItems: 'center' }}>
+              <input
+                type="text" placeholder="Libellé (Ex: Billet d'avion)"
+                value={item.label}
+                onChange={(e) => { const updated = [...newQuote.assistance_items]; updated[index].label = e.target.value; setNewQuote({ ...newQuote, assistance_items: updated }); }}
+                required
+                style={{ flexGrow: 1, marginRight: '10px' }}
+              />
+              <input
+                type="number" placeholder="Montant (DT)" step="0.01" min="0"
+                value={item.amount}
+                onChange={(e) => { const updated = [...newQuote.assistance_items]; updated[index].amount = e.target.value; setNewQuote({ ...newQuote, assistance_items: updated }); }}
+                required
+                style={{ width: '120px', marginRight: '10px' }}
+              />
+              <button
+                type="button"
+                className="action-button button-small button-warning button-icon-only"
+                onClick={() => {
+                  if (newQuote.assistance_items.length > 1) { // Keep at least one item
+                    const updated = [...newQuote.assistance_items];
+                    updated.splice(index, 1);
+                    setNewQuote({ ...newQuote, assistance_items: updated });
+                  }
+                }}
+                title="Supprimer cet élément"
+                disabled={newQuote.assistance_items.length <= 1} // Disable removing the last item
+              >
+                ❌
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => setNewQuote({ ...newQuote, assistance_items: [...newQuote.assistance_items, { label: '', amount: '' }] })}
+            className="action-button button-small"
+            style={{ marginTop: '5px' }}
+          >
+            + Ajouter Élément d'Assistance
+          </button>
+        </div>
+      </FormDialog>
+
+    </>
+  );
 }
 
+// --- Custom Pagination Component (Keep as is) ---
+const CustomPagination = ({ count, rowsPerPage, page, onPageChange, onRowsPerPageChange, rowsPerPageOptions }) => {
+  const totalPages = Math.ceil(count / rowsPerPage);
+  const startRow = count === 0 ? 0 : page * rowsPerPage + 1;
+  const endRow = Math.min(count, (page + 1) * rowsPerPage);
+
+  const handlePreviousPage = () => { if (page > 0) onPageChange(page - 1); };
+  const handleNextPage = () => { if (page < totalPages - 1) onPageChange(page + 1); };
+  const handleRowsPerPageChange = (event) => {
+    const newRowsPerPage = parseInt(event.target.value, 10);
+    onRowsPerPageChange(newRowsPerPage); // Call handler passed from parent
+  };
+
+  return (
+    <div className="pagination-controls">
+      <div className="pagination-info">
+        <span>Lignes par page :</span>
+        <select className="pagination-rows-select" value={rowsPerPage} onChange={handleRowsPerPageChange} aria-label="Lignes par page">
+          {rowsPerPageOptions.map(option => (<option key={option} value={option}>{option}</option>))}
+        </select>
+        <span style={{ marginLeft: '15px', fontWeight: '500' }}>{startRow}-{endRow} sur {count}</span>
+      </div>
+      <div className="pagination-buttons">
+        <button onClick={handlePreviousPage} disabled={page === 0 || count === 0} aria-label="Page précédente">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg> Préc.
+        </button>
+        <button onClick={handleNextPage} disabled={page >= totalPages - 1 || count === 0} aria-label="Page suivante">
+          Suiv. <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Export the SupervisorDashboard component
 export default SupervisorDashboard;

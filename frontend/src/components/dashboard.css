@@ -126,8 +126,8 @@ html, body {
     box-shadow: 0 2px 5px rgba(0,0,0,0.1);
 }
 .header-actions button:focus-visible {
-     outline: 2px solid var(--text-on-primary);
-     outline-offset: 2px;
+      outline: 2px solid var(--text-on-primary);
+      outline-offset: 2px;
 }
 .menu-toggle {
     display: none; /* Hidden by default, shown in media query */
@@ -200,10 +200,10 @@ html, body {
     border-left-color: var(--primary-color);
 }
 .sidebar-button:focus-visible {
-     outline: none;
-     background-color: var(--accent-color);
-     border-left-color: var(--primary-color);
-     box-shadow: inset 0 0 0 2px var(--primary-color); /* Inset focus ring */
+      outline: none;
+      background-color: var(--accent-color);
+      border-left-color: var(--primary-color);
+      box-shadow: inset 0 0 0 2px var(--primary-color); /* Inset focus ring */
 }
 
 /* Content Area (Enhanced Spacing) */
@@ -257,10 +257,10 @@ html, body {
     border-bottom: 1px solid var(--border-color);
 }
 .section-header h3 {
-     margin: 0;
-     font-size: 1.6rem; /* Larger section header */
-     color: var(--accent-dark);
-     font-weight: 600; /* Bolder */
+      margin: 0;
+      font-size: 1.6rem; /* Larger section header */
+      color: var(--accent-dark);
+      font-weight: 600; /* Bolder */
 }
 
 /* Form Styling (Enhanced) */
@@ -307,9 +307,9 @@ html, body {
 }
 .form-group textarea { min-height: 120px; height: auto; resize: vertical; padding-top: 12px; } /* More padding */
 .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
-     border-color: var(--primary-color);
-     outline: none;
-     box-shadow: 0 0 0 3px rgba(9, 93, 126, 0.3); /* Adjusted focus ring based on primary */
+      border-color: var(--primary-color);
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(9, 93, 126, 0.3); /* Adjusted focus ring based on primary */
 }
 .form-group input[type="file"] { padding: 10px; cursor: pointer; background-color: var(--bg-section-alt); height: auto; border-style: dashed; } /* Dashed border for file input */
 .form-group small { font-size: 0.85em; color: var(--text-light); display: block; margin-top: 6px; }
@@ -336,9 +336,9 @@ html, body {
 }
 .submit-btn { padding: 14px 35px; font-size: 1.05em; } /* Larger submit */
 .action-button:hover, .submit-btn:hover, .modal-button.confirm-button:hover {
-     background: linear-gradient(135deg, var(--secondary-color) 0%, var(--primary-color) 100%); /* Reverse gradient */
-     transform: translateY(-2px) scale(1.02); /* Lift and slightly scale */
-     box-shadow: var(--shadow-hover); /* Use defined hover shadow */
+      background: linear-gradient(135deg, var(--secondary-color) 0%, var(--primary-color) 100%); /* Reverse gradient */
+      transform: translateY(-2px) scale(1.02); /* Lift and slightly scale */
+      box-shadow: var(--shadow-hover); /* Use defined hover shadow */
 }
  .modal-button.cancel-button {
     background: var(--modal-cancel-bg);
@@ -350,15 +350,15 @@ html, body {
     box-shadow: var(--shadow-md);
  }
 .action-button:disabled, .submit-btn:disabled, .modal-button:disabled {
-     background: #bdc3c7 !important; /* Use a neutral gray */
-     cursor: not-allowed;
-     transform: none;
-     box-shadow: none;
-     opacity: 0.6;
+      background: #bdc3c7 !important; /* Use a neutral gray */
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+      opacity: 0.6;
 }
 .action-button:focus-visible, .submit-btn:focus-visible, .modal-button:focus-visible {
-     outline: none;
-     box-shadow: 0 0 0 3px var(--bg-section), 0 0 0 5px var(--primary-color); /* Clearer focus ring */
+      outline: none;
+      box-shadow: 0 0 0 3px var(--bg-section), 0 0 0 5px var(--primary-color); /* Clearer focus ring */
 }
 /* Specific button variants */
 .button-link { background: none; color: var(--primary-color); padding: 0; box-shadow: none; font-weight: 500; }
@@ -427,6 +427,36 @@ html, body {
 .styled-table .status-inactive { color: var(--error-color); font-weight: 600; }
 .styled-table .comment-cell { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
 .styled-table .no-results-row td { text-align: center; padding: 40px; color: var(--text-light); font-style: italic; font-size: 1.1em; }
+
+/* Styles for Status Badges and Quote Icons (as requested in previous prompt) */
+.status-badge {
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.85em;
+  display: inline-block;
+  text-transform: capitalize;
+  font-weight: 500; /* Added for better visibility */
+  line-height: 1.4; /* Ensure consistent height */
+}
+.status-badge.pending { background-color: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+.status-badge.confirmed { background-color: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
+.status-badge.cancelled { background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+.status-badge.rendez-vous-pris { background-color: #e0e7ff; color: #3730a3; border: 1px solid #c7d2fe; }
+.status-badge.devis-envoye { background-color: #ccfbf1; color: #0f766e; border: 1px solid #99f6e4; }
+.status-badge.default { background-color: #e5e7eb; color: #374151; border: 1px solid #d1d5db; }
+
+.quote-link-icon {
+  font-size: 1.3em; /* Slightly larger for better visibility */
+  text-decoration: none;
+  margin-left: 10px; /* More space */
+  vertical-align: middle;
+  color: var(--secondary-color); /* Use a theme color */
+  transition: color var(--transition-speed-fast) ease;
+}
+.quote-link-icon:hover {
+  color: var(--primary-color); /* Darken on hover */
+}
+
 
 /* Pagination Styling (Enhanced) */
 .pagination-controls {
@@ -661,6 +691,41 @@ html, body {
 .form-dialog-content .modal-body { /* Ensure form starts from left */
     text-align: left;
 }
+.form-group-inline {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+.form-group-inline input[type="text"],
+.form-group-inline input[type="number"] {
+    flex-grow: 1;
+}
+.form-group-inline button {
+    padding: 8px 10px;
+    background-color: var(--error-color);
+    color: white;
+    border: none;
+    border-radius: var(--border-radius-sm);
+    cursor: pointer;
+    font-size: 1.2em; /* Make X slightly larger */
+    line-height: 1;
+}
+.form-group-inline button:hover {
+    background-color: #c53030; /* Darken error color */
+}
+.readonly-appointment-label {
+    padding: 12px 16px;
+    background-color: var(--bg-section-alt);
+    border: 1px solid var(--input-border-color);
+    border-radius: var(--border-radius-sm);
+    font-size: 0.95em;
+    color: var(--text-light);
+}
+.readonly-appointment-label strong {
+    color: var(--text-dark);
+    font-weight: 600;
+}
 
 
  /* Tooltip Styles (Enhanced) */
@@ -720,42 +785,177 @@ html, body {
         visibility: hidden;
         transition: opacity var(--transition-speed-med) ease, visibility var(--transition-speed-med) ease;
     }
-    .sidebar.open ~ .content-area .content-overlay { /* Use ~ sibling combinator */
+    .sidebar.open ~ .main-content-wrapper .content-overlay { /* Adjusted selector to target overlay correctly */
         opacity: 1;
         visibility: visible;
     }
 }
  @media (min-width: 993px) {
-     .dashboard-header .menu-toggle { display: none; }
-     .content-overlay { display: none; } /* Hide overlay on desktop */
+      .dashboard-header .menu-toggle { display: none; }
+      .content-overlay { display: none; } /* Hide overlay on desktop */
  }
 @media (max-width: 768px) {
-     .content-area { padding: 25px; } /* Adjust padding */
-     .filter-controls { flex-direction: column; align-items: stretch; gap: 15px; }
-     .pagination-controls { flex-direction: column; align-items: center; gap: 15px; text-align: center; }
-     .pagination-info { justify-content: center; }
-     .toast-notification { bottom: 20px; right: 20px; left: 20px; width: auto; min-width: 0; }
-     .modal-content { padding: 25px 20px; max-width: 90%; }
-     .modal-actions { flex-direction: column; gap: 12px; align-items: stretch; }
-     .modal-button { width: 100%; }
-     .section-header { flex-direction: column; align-items: flex-start; gap: 15px; }
-     .section-header h3 { font-size: 1.4rem; }
-     .styled-table th, .styled-table td { padding: 12px 15px; } /* Adjust table padding */
-     .actions-cell button { margin-bottom: 5px; } /* Stack actions slightly */
+      .content-area { padding: 25px; } /* Adjust padding */
+      .filter-controls { flex-direction: column; align-items: stretch; gap: 15px; }
+      .pagination-controls { flex-direction: column; align-items: center; gap: 15px; text-align: center; }
+      .pagination-info { justify-content: center; }
+      .toast-notification { bottom: 20px; right: 20px; left: 20px; width: auto; min-width: 0; }
+      .modal-content { padding: 25px 20px; max-width: 90%; }
+      .modal-actions { flex-direction: column; gap: 12px; align-items: stretch; }
+      .modal-button { width: 100%; }
+      .section-header { flex-direction: column; align-items: flex-start; gap: 15px; }
+      .section-header h3 { font-size: 1.4rem; }
+      .styled-table th, .styled-table td { padding: 12px 15px; } /* Adjust table padding */
+      .actions-cell button { margin-bottom: 5px; } /* Stack actions slightly */
+      .form-grid { grid-template-columns: 1fr; } /* Single column for forms */
 }
  @media (max-width: 480px) {
-     .dashboard-header { height: 60px; padding: 0 15px; }
-     .main-content-wrapper { padding-top: 60px; }
-     .sidebar { top: 60px; height: calc(100vh - 60px); width: 220px; }
-     .content-area { padding: 20px; }
-     .content-area h2 { font-size: 1.6rem; margin-bottom: 25px; }
-     .content-area h3 { font-size: 1.3rem; }
-     .styled-table th, .styled-table td { padding: 10px 12px; font-size: 0.9em; }
-     .action-button, .submit-btn { font-size: 0.95em; padding: 10px 20px; }
-     .button-small { padding: 6px 15px; font-size: 0.85em; }
-     .filter-controls { gap: 10px; }
-     .form-group input, .form-group select, .form-group textarea { height: 44px; padding: 10px 14px; }
-     .modal-content { padding: 20px 15px; }
-     .modal-title { font-size: 1.4em; }
-     .modal-message { font-size: 1em; }
+      .dashboard-header { height: 60px; padding: 0 15px; }
+      .main-content-wrapper { padding-top: 60px; }
+      .sidebar { top: 60px; height: calc(100vh - 60px); width: 220px; }
+      .content-area { padding: 20px; }
+      .content-area h2 { font-size: 1.6rem; margin-bottom: 25px; }
+      .content-area h3 { font-size: 1.3rem; }
+      .styled-table th, .styled-table td { padding: 10px 12px; font-size: 0.9em; }
+      .action-button, .submit-btn { font-size: 0.95em; padding: 10px 20px; }
+      .button-small { padding: 6px 15px; font-size: 0.85em; }
+      .filter-controls { gap: 10px; }
+      .form-group input, .form-group select, .form-group textarea { height: 44px; padding: 10px 14px; }
+      .modal-content { padding: 20px 15px; }
+      .modal-title { font-size: 1.4em; }
+      .modal-message { font-size: 1em; }
  }
+.summary-cards {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.summary-card {
+  background-color: var(--card-bg);
+  padding: 15px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  flex-grow: 1; 
+  text-align: center;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary); 
+}
+
+.summary-card svg {
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.filter-controls.advanced {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap; 
+}
+
+.filter-controls.advanced select,
+.filter-controls.advanced button {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background-color: var(--input-bg);
+  color: var(--text-primary);
+}
+
+.filter-controls.advanced label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-light);
+}
+.filter-controls.advanced input[type="checkbox"] {
+  margin-right: 5px;
+  accent-color: var(--primary-color);
+}
+
+
+.chart-data-table {
+  margin-top: 25px;
+  overflow-x: auto; 
+}
+
+.chart-data-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.chart-data-table th,
+.chart-data-table td {
+  border: 1px solid var(--border-color);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.chart-data-table th {
+  background-color: var(--table-header-bg);
+  color: var(--text-primary);
+}
+
+.chart-data-table td {
+  color: var(--text-light);
+}
+
+
+  .chart-container {
+    height: 300px !important; 
+    overflow-x: auto; 
+  }
+
+  .filter-controls.advanced {
+    flex-direction: column;
+    gap: 10px;
+    align-items: stretch; 
+  }
+
+  .filter-controls.advanced select,
+  .filter-controls.advanced button,
+  .filter-controls.advanced label {
+    width: 100%; 
+    justify-content: space-between; 
+  }
+
+
+  .summary-cards {
+    flex-direction: column; 
+    gap: 10px;
+  }
+  .summary-card {
+    width: 100%; 
+  }
+.status-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 0.85em;
+  text-align: center;
+  min-width: 80px;
+  color: #fff;
+  background-color: #999; /* default fallback */
+}
+
+.status-badge.accepted {
+  background-color: #38a169; /* green */
+}
+
+.status-badge.refused {
+  background-color: #e53e3e; /* red */
+}
+
+.status-badge.pending {
+  background-color: #d69e2e; /* yellow */
+}
+
+.status-badge.nd,
+.status-badge.undefined {
+  background-color: #718096; /* gray for N/D or missing */
+}

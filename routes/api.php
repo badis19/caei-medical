@@ -32,6 +32,8 @@ Route::get('/email/verify/{id}/{hash}', [VerificationController::class, 'verify'
 Route::post('/email/resend', [VerificationController::class, 'resend'])->name('verification.resend');
 Route::post('/password/forgot', [PasswordResetController::class, 'sendResetLinkEmail'])->name('password.email');
 Route::post('/password/reset', [PasswordResetController::class, 'reset'])->name('password.reset');
+Route::get('/admin/quotes/{id}/preview', [AdminQuoteController::class, 'preview']);
+Route::get('/superviseur/quotes/{id}/preview', [SupervisorQuoteController::class, 'preview']);
 
 // Protected routes
 Route::middleware('auth:sanctum')->group(function () {
@@ -66,6 +68,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/quotes/{id}/upload', [AdminQuoteController::class, 'uploadFile'])->name('quotes.upload');
         Route::get('/quotes/{id}/download', [AdminQuoteController::class, 'download'])->name('quotes.download');
         Route::get('/clinic-quotes', [AdminQuoteController::class, 'clinicQuotes']);
+        Route::get('/quotes/{id}/export-pdf', [AdminQuoteController::class, 'exportPdf'])->name('quotes.export');
+        Route::put('/quotes/{id}', [AdminQuoteController::class, 'update']);
+
+        
+        Route::post('/quotes/{id}/send-to-patient', [AdminQuoteController::class, 'sendToPatient']);
+        
+
+
 
     });
 
@@ -82,12 +92,17 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/appointments', [SupervisorAppointmentController::class, 'index'])->name('appointments.index');
         Route::get('/appointments/{id}', [SupervisorAppointmentController::class, 'show'])->name('appointments.show');
-
         Route::get('/quotes', [SupervisorQuoteController::class, 'index'])->name('quotes.index');
         Route::post('/quotes', [SupervisorQuoteController::class, 'store'])->name('quotes.store');
         Route::post('/quotes/{id}/upload', [SupervisorQuoteController::class, 'uploadFile'])->name('quotes.upload');
         Route::get('/quotes/{id}/download', [SupervisorQuoteController::class, 'download'])->name('quotes.download');
         Route::get('/clinic-quotes', [SupervisorQuoteController::class, 'clinicQuotes']);
+        Route::get('/quotes/{id}/export-pdf', [SupervisorQuoteController::class, 'exportPdf'])->name('quotes.export');
+        Route::put('/quotes/{id}', [SupervisorQuoteController::class, 'update']);
+
+        
+        Route::post('/quotes/{id}/send-to-patient', [SupervisorQuoteController::class, 'sendToPatient']);
+
 
         Route::get('/statistics', [SupervisorStatisticsController::class, 'getStatistics'])->name('statistics');
     });
@@ -118,7 +133,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/profile', [PatientProfileController::class, 'update']);
         Route::get('/appointments', [PatientProfileController::class, 'appointments']);
         Route::post('/medical-files/upload', [PatientProfileController::class, 'uploadMedicalFile']);
-        Route::get('/quote', [PatientQuoteController::class, 'show']);
+        Route::get('/quotes', [PatientQuoteController::class, 'index']);
+
         Route::patch('/quotes/{quote}/status', [PatientQuoteController::class, 'updateStatus']);
         Route::get('/quotes/{id}/download', [PatientQuoteController::class, 'download']);
     });
@@ -129,4 +145,18 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/appointments/{appointment}/upload-quote', [CliniqueAppointmentController::class, 'uploadQuote']);
         Route::delete('/appointments/{id}/delete-quote', [CliniqueAppointmentController::class, 'deleteQuote']);
     });
+});
+
+
+Route::post('/broadcasting/auth', function (Request $request) {
+    $user = Auth::guard('sanctum')->user();
+
+    if (!$user) {
+        \Log::warning('❌ Broadcasting auth failed - no user');
+        return response()->json(['message' => 'Unauthorized'], 403);
+    }
+
+    Auth::setUser($user);
+    \Log::info("✅ Broadcasting auth success for user: {$user->id}");
+    return Broadcast::auth($request);
 });

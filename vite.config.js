@@ -1,13 +1,28 @@
 import { defineConfig } from 'vite';
-import laravel from 'laravel-vite-plugin';
-import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
 
 export default defineConfig({
-    plugins: [
-        laravel({
-            input: ['resources/css/app.css', 'resources/js/app.js'],
-            refresh: true,
-        }),
-        tailwindcss(),
-    ],
+  plugins: [react()],
+  root: path.resolve(__dirname, 'frontend'),
+  server: {
+    port: 5174,
+    strictPort: true,
+    open: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false,
+        ws: true,
+      }
+    }
+  },
+  build: {
+    outDir: path.resolve(__dirname, 'public/build'),
+    emptyOutDir: true,
+    rollupOptions: {
+      input: path.resolve(__dirname, 'frontend/index.html')
+    }
+  }
 });

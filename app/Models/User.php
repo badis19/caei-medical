@@ -10,7 +10,8 @@ use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Database\Eloquent\SoftDeletes; // Import SoftDeletes
 use Spatie\Permission\Traits\HasRoles;        // Import Spatie HasRoles trait
-
+use Illuminate\Auth\Notifications\ResetPassword;
+use App\Notifications\WelcomePasswordSetup;
 class User extends Authenticatable
 {
     // Order of traits matters sometimes, especially with bootable traits.
@@ -23,15 +24,19 @@ class User extends Authenticatable
      * @var array<int, string>
      */
     protected $fillable = [
-        'name',
-        'last_name',
-        'image_de_profil',
-        'telephone',
-        'adresse',
-        'email',
-        'password',
-        'role', // Keep if you need a primary role display, otherwise Spatie handles roles
-    ];
+    'name',
+    'last_name',
+    'image_de_profil',
+    'telephone',
+    'adresse',
+    'email',
+    'password',
+    'role',
+    'date_de_naissance',     // ✅ Add this
+    'allergies',              // ✅ Add this
+    'medical_history',        // ✅ And this
+];
+
 
     /**
      * The attributes that should be hidden for serialization.
@@ -86,6 +91,11 @@ class User extends Authenticatable
     return $this->hasMany(PatientFile::class);
 }
 
+
+public function sendPasswordResetNotification($token)
+{
+    $this->notify(new WelcomePasswordSetup($token, $this->email));
+}
 
     // Note: The HasRoles trait from Spatie automatically adds the following relationships:
     // - roles(): BelongsToMany relationship to Role model

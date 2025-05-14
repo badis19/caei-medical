@@ -7,31 +7,19 @@ use App\Models\Appointment;
 
 class SupervisorAppointmentController extends Controller
 {
-    /**
-     * Display a listing of the appointments.
-     *
-     * @return \Illuminate\Http\JsonResponse
-     */
-    public function index()
-    {
-        // Supervisor can list all appointments
-        return response()->json(Appointment::paginate(10));
-    }
+      public function index(Request $request)
+{
+    $perPage = $request->query('limit', 10); // default to 10 if not provided
+    return response()->json(Appointment::paginate($perPage));
+}
 
-    /**
-     * Display the specified appointment.
-     *
-     * @param  int  $id
-     * @return \Illuminate\Http\JsonResponse
-     */
+    // Display a single appointment
     public function show($id)
     {
         $appointment = Appointment::find($id);
-
         if (!$appointment) {
             return response()->json(['message' => 'Appointment not found'], 404);
         }
-
         return response()->json($appointment);
     }
 }

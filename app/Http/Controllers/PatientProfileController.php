@@ -70,4 +70,25 @@ class PatientProfileController extends Controller
 
         return response()->json($appointments);
     }
+
+    public function update(Request $request)
+{
+    $user = $request->user();
+
+    $validated = $request->validate([
+        'telephone' => 'nullable|string|max:20',
+        'date_de_naissance' => 'nullable|date',
+        'adresse' => 'nullable|string|max:255',
+        'allergies' => 'nullable|string|max:1000',
+        'medical_history' => 'nullable|string|max:2000',
+    ]);
+
+    $user->update($validated);
+
+    return response()->json($user->only([
+        'id', 'name', 'last_name', 'email', 'telephone',
+        'date_de_naissance', 'adresse', 'allergies', 'medical_history'
+    ]));
+}
+
 }

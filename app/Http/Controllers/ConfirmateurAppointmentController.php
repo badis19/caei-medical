@@ -5,15 +5,19 @@ namespace App\Http\Controllers;
 use App\Models\Appointment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
-use App\Mail\AppointmentStatusUpdated;
+use App\Mail\AppointmentStatusUpdated as AppointmentStatusUpdatedMail;
+use App\Events\AppointmentStatusUpdated;
 
 class ConfirmateurAppointmentController extends Controller
 {
     // GET /confirmateur/appointments
     public function index(Request $request)
     {
-        $query = Appointment::with(['patient:id,name,last_name,email,telephone', 'clinique:id,name', 'agent:id,name,last_name']);
-
+        $query = Appointment::with([
+            'patient:id,name,last_name,email,telephone',
+            'clinique:id,name',
+            'agent:id,name,last_name'
+        ]);
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -33,8 +37,10 @@ class ConfirmateurAppointmentController extends Controller
     // GET /confirmateur/appointments/{id}
     public function show($id)
     {
-        $appointment = Appointment::with(['patient:id,name,last_name,email', 'clinique:id,name'])
-            ->findOrFail($id);
+        $appointment = Appointment::with([
+            'patient:id,name,last_name,email',
+            'clinique:id,name'
+        ])->findOrFail($id);
 
         return response()->json($appointment);
     }
@@ -46,20 +52,26 @@ class ConfirmateurAppointmentController extends Controller
             'status' => 'required|in:confirmed,cancelled',
         ]);
 
-        $appointment = Appointment::with('patient')->findOrFail($id);
+        $appointment = Appointment::with(['patient', 'clinique', 'agent'])->findOrFail($id);
         $appointment->status = $request->status;
         $appointment->save();
 
-        // Auto-send email upon status update
+        // 🔄 Broadcast the status update to admin, superviseur, and patient
+        event(new AppointmentStatusUpdated($appointment));
+
+        // 📧 Send email notification to the patient
         if ($appointment->patient && $appointment->patient->email) {
-            Mail::to($appointment->patient->email)->send(new AppointmentStatusUpdated($appointment));
+            Mail::to($appointment->patient->email)->send(new AppointmentStatusUpdatedMail($appointment));
         }
 
         return response()->json([
-            'message' => "Appointment {$appointment->id} updated to {$appointment->status} and email sent.",
-            'appointment' => $appointment->load('patient:id,name,last_name,email,telephone', 'agent:id,name,last_name', 'clinique:id,name'),
+            'message' => "Appointment {$appointment->id} updated to {$appointment->status}, broadcasted and email sent.",
+            'appointment' => $appointment->load(
+                'patient:id,name,last_name,email,telephone',
+                'agent:id,name,last_name',
+                'clinique:id,name'
+            ),
         ]);
-        
     }
 
     // POST /confirmateur/appointments/{id}/send-confirmation-email
@@ -68,7 +80,7 @@ class ConfirmateurAppointmentController extends Controller
         $appointment = Appointment::with('patient')->findOrFail($id);
 
         if ($appointment->patient && $appointment->patient->email) {
-            Mail::to($appointment->patient->email)->send(new AppointmentStatusUpdated($appointment));
+            Mail::to($appointment->patient->email)->send(new AppointmentStatusUpdatedMail($appointment));
             return response()->json(['message' => 'Confirmation email sent.']);
         }
 
@@ -77,16 +89,15 @@ class ConfirmateurAppointmentController extends Controller
 
     // POST /confirmateur/appointments/{id}/send-confirmation-sms
     public function sendConfirmationSms($id)
-{
-    $appointment = Appointment::with('patient')->findOrFail($id);
+    {
+        $appointment = Appointment::with('patient')->findOrFail($id);
 
-    if ($appointment->patient && $appointment->patient->telephone) {
-        // Simulate SMS sending
-        // Example: Twilio::send($appointment->patient->telephone, "Your appointment on {$appointment->date_du_rdv} is {$appointment->status}.");
-        return response()->json(['message' => 'SMS sent (simulation).']);
+        if ($appointment->patient && $appointment->patient->telephone) {
+            // Simulate SMS sending
+            // Example: Twilio::send($appointment->patient->telephone, "Your appointment on {$appointment->date_du_rdv} is {$appointment->status}.");
+            return response()->json(['message' => 'SMS sent (simulation).']);
+        }
+
+        return response()->json(['message' => 'No valid patient phone number found.'], 422);
     }
-
-    return response()->json(['message' => 'No valid patient phone number found.'], 422);
-}
-
 }

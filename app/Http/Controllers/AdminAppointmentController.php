@@ -7,11 +7,11 @@ use App\Models\Appointment;
 
 class AdminAppointmentController extends Controller
 {
-    // List all appointments
-    public function index()
-    {
-        return response()->json(Appointment::paginate(10));
-    }
+      public function index(Request $request)
+{
+    $perPage = $request->query('limit', 10); // default to 10 if not provided
+    return response()->json(Appointment::paginate($perPage));
+}
 
     // Display a single appointment
     public function show($id)

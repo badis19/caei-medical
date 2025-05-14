@@ -8,7 +8,8 @@ use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
-
+use App\Events\AppointmentCreated; // ✅ Add this at the top with other use statements
+use Illuminate\Support\Facades\Log;
 class AgentAppointmentController extends Controller
 {
     public function index(Request $request)
@@ -36,7 +37,7 @@ class AgentAppointmentController extends Controller
             'whatsapp' => 'required|boolean',
             'service' => 'required|string|max:255',
             'date_du_rdv' => 'required|date|after_or_equal:today',
-            'clinique_id' => ['nullable', 'integer', Rule::exists('users', 'id')],
+            'clinique_id' => ['required', 'integer', Rule::exists('users', 'id')],
             'commentaire_agent' => 'nullable|string',
             'qualification' => 'nullable|string',
             'commentaire_1' => 'nullable|string',
@@ -88,8 +89,12 @@ if (!$patient) {
                 'email' => $patient->email,
             ]
         ));
-        
 
+        Log::info('✅ Appointment created, dispatching AppointmentCreated event', [
+            'appointment_id' => $appointment->id,
+        ]);
+        
+        event(new AppointmentCreated($appointment));
         return response()->json($appointment->load(['patient:id,name,last_name', 'clinique:id,name']), 201);
     }
 

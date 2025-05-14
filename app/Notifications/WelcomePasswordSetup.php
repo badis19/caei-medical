@@ -32,15 +32,19 @@ class WelcomePasswordSetup extends Notification
             ->subject('Welcome to the Platform')
             ->greeting("Hello {$notifiable->name},")
             ->line("Your account has been created with email: {$this->email}");
-
+    
         if ($this->plaintextPassword) {
             $mail->line("Your temporary password is: **{$this->plaintextPassword}**")
                  ->line("You can log in directly using these credentials.");
         } else {
+            // ✅ Update this line to point to your React frontend
+            $frontendUrl = "http://localhost:5173/reset-password?token={$this->token}&email={$this->email}&welcome=true";
+    
             $mail->line('To set your password, click the button below:')
-                 ->action('Set Password', url(config('app.url') . route('password.reset', $this->token, false)));
+                 ->action('Set Password', $frontendUrl);
         }
-
+    
         return $mail->line('Thank you for joining us!');
     }
+    
 }
